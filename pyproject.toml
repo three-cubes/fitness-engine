@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "three-cubes-fitness"
+version = "0.1.0"
+description = "Shared architecture-fitness primitives for Three Cubes repos (kairix, tc-agent-zone): baseline-gating helpers, agent-actionable emit/YAML helpers, and the unified ratchet grammar."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Three Cubes" }]
+keywords = ["fitness-functions", "architecture", "ratchet", "ci"]
+classifiers = [
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+
+# Pure stdlib at runtime. PyYAML is an optional extra: load_yaml() degrades
+# gracefully (returns an error string) when it is absent, so consumers that
+# never touch YAML need not install it.
+dependencies = []
+
+[project.optional-dependencies]
+yaml = ["PyYAML>=6.0"]
+dev = ["pytest>=8.0", "PyYAML>=6.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tc_fitness"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
