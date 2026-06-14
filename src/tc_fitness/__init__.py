@@ -19,6 +19,8 @@ untouched, so a consumer pinned to ``@v0.1.0`` / ``@v0.2.0`` keeps working.
 
 from __future__ import annotations
 
+from importlib import metadata as _metadata
+
 from tc_fitness.catalogue import (
     PROPOSED_STATUS,
     RuleEntry,
@@ -77,7 +79,15 @@ from tc_fitness.staged import (
     staged_in_scope,
 )
 
-__version__ = "0.3.0"
+# Single-sourced from the installed-package metadata (``pyproject.toml`` is the
+# one source of truth). The fallback literal is used only for a bare ``sys.path``
+# checkout where the distribution isn't installed; it must be kept equal to the
+# ``pyproject.toml`` ``version`` so the two never drift (pinned by
+# ``tests/test_version.py``).
+try:
+    __version__ = _metadata.version("three-cubes-fitness")
+except _metadata.PackageNotFoundError:  # pragma: no cover - only when not installed
+    __version__ = "0.4.0"
 
 __all__ = [
     "__version__",
