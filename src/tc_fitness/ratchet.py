@@ -105,23 +105,34 @@ class Override:
     vague: bool
 
 
-def is_vague_reason(reason: str) -> bool:
+def is_vague_reason(reason: str, *, min_len: int = OVERRIDE_MIN_REASON_LEN) -> bool:
     """Return True when ``reason`` is too short or matches the vague lead-in set.
 
     Trailing dots and surrounding whitespace are stripped before measuring, so
-    ``"WIP."`` and ``"   short  "`` are judged on their substance. Uses the
-    reconciled ``< OVERRIDE_MIN_REASON_LEN`` threshold (strictly-less-than).
+    ``"WIP."`` and ``"   short  "`` are judged on their substance. The length
+    floor defaults to the reconciled ``OVERRIDE_MIN_REASON_LEN`` (=40,
+    strictly-less-than). Pass ``min_len`` to override the floor — tc-agent-zone's
+    shell directives use a 10-char floor, so its checks call with
+    ``min_len=10``. The default keeps the v0.1.0 behaviour byte-identical.
     """
     compact = reason.strip().rstrip(".").strip()
-    return len(compact) < OVERRIDE_MIN_REASON_LEN or bool(VAGUE_OVERRIDE_RE.match(compact))
+    return len(compact) < min_len or bool(VAGUE_OVERRIDE_RE.match(compact))
 
 
-def parse_overrides(text: str, override_re: re.Pattern[str]) -> list[Override]:
+def parse_overrides(
+    text: str,
+    override_re: re.Pattern[str],
+    *,
+    min_len: int = OVERRIDE_MIN_REASON_LEN,
+) -> list[Override]:
     """Parse every acknowledgement line in ``text`` using ``override_re``.
 
     ``text`` is typically a commit message or PR body. Lines that don't match
     are ignored. Each match becomes an :class:`Override` with ``vague`` computed
-    via :func:`is_vague_reason`.
+    via :func:`is_vague_reason`. ``min_len`` is forwarded to
+    :func:`is_vague_reason` and defaults to :data:`OVERRIDE_MIN_REASON_LEN`
+    (=40), so the v0.1.0 call shape is unchanged; pass ``min_len=10`` for
+    tc-agent-zone's shell-directive floor.
     """
     out: list[Override] = []
     for line in (text or "").splitlines():
@@ -129,7 +140,13 @@ def parse_overrides(text: str, override_re: re.Pattern[str]) -> list[Override]:
         if not match:
             continue
         reason = match.group("reason").strip()
-        out.append(Override(target=match.group("target"), reason=reason, vague=is_vague_reason(reason)))
+        out.append(
+            Override(
+                target=match.group("target"),
+                reason=reason,
+                vague=is_vague_reason(reason, min_len=min_len),
+            )
+        )
     return out
 
 

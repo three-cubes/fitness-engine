@@ -22,9 +22,9 @@ It ships two modules:
 ```python
 from tc_fitness import (
     # baseline gating (kairix surface)
-    gate, python_files, main_entry, repo_relative, REPO_ROOT,
+    gate, gate_keys, python_files, main_entry, repo_relative, REPO_ROOT,
     # agent-actionable emit / YAML (tc-agent-zone surface)
-    actionable, emit_failures, emit_pass, load_yaml, missing_keys,
+    actionable, remediation, emit_failures, emit_pass, load_yaml, missing_keys,
     # unified ratchet primitives
     OVERRIDE_MIN_REASON_LEN, make_override_re, parse_overrides, Override,
     COVERAGE_OVERRIDE_RE, MUTATION_OVERRIDE_RE,
@@ -33,6 +33,13 @@ from tc_fitness import (
     contains_suppression, is_bare_suppression,
 )
 ```
+
+> **v0.2.0 is an additive, backward-compatible superset of v0.1.0.** Every
+> v0.1.0 signature and behaviour is unchanged when the new optional parameters
+> are left at their defaults. A consumer pinned to `@v0.1.0` keeps working
+> unmodified; the additions (`gate_keys`, `remediation`, `actionable(..., run=)`,
+> `is_vague_reason(..., min_len=)`, `parse_overrides(..., min_len=)`) exist to
+> cover tc-agent-zone's check surface. See *What v0.2.0 adds* below.
 
 ### Baseline gating
 
@@ -79,6 +86,83 @@ if err is None:
 isn't installed, so the dependency is optional — install the `yaml` extra only if
 you call it.
 
+## What v0.2.0 adds
+
+v0.2.0 extends the surface to cover tc-agent-zone's 116-check fleet — additively,
+so kairix's `@v0.1.0` pin needs no change. Four additions:
+
+### `actionable(what, fix, nxt, run=None)` — optional 3-marker form
+
+59 tc-agent-zone checks emit a `fix:/next:/run:` triple. `actionable` now takes an
+optional fourth `run` argument; supplying it appends `; run: <run>`. With `run`
+omitted (the default), the output is **byte-identical** to v0.1.0's 2-marker
+`<what>; fix: <fix>; next: <nxt>`.
+
+```python
+actionable("X broke", "do Y", "rerun Z")                  # X broke; fix: do Y; next: rerun Z
+actionable("X broke", "do Y", "rerun Z", "python check.py")  # ...; next: rerun Z; run: python check.py
+```
+
+### `remediation(fix, nxt, run, *, passing=None, forbidden=None)` — multiline block
+
+30 tc-agent-zone checks emit a multiline F21-shape remediation block: the three
+action markers on their own lines, optionally followed by a `Pass` and a
+`Forbidden` example. `remediation` formats that block (no trailing newline),
+ready to `print()`.
+
+```python
+print(remediation(
+    "redact the secret", "re-run the check", "python scripts/checks/check_f15.py",
+    passing='logger.info("token redacted")',
+    forbidden='logger.info(f"token={token}")',
+))
+# fix: redact the secret
+# next: re-run the check
+# run: python scripts/checks/check_f15.py
+# Pass: logger.info("token redacted")
+# Forbidden: logger.info(f"token={token}")
+```
+
+### `gate_keys(name, current, remediation, *, baseline_suffix="-ids.txt")` — string-keyed ratchet
+
+13 tc-agent-zone checks ratchet a baseline whose KEY is a logical id (`-ids.txt`,
+e.g. `F30:my_tool`) or a path-glob (`-paths.txt`, e.g. `kairix/**/web/static/*`),
+NOT a working-tree file path. `gate()` keys on `Path` objects and *relativises
+absolute paths* under `repo_root` — wrong for opaque string keys. `gate_keys` is
+its string-keyed sibling: same net-new-fails / shrinks-only / grandfather
+semantics and the same exit-code contract, but keys are treated as opaque
+strings (no `Path` coercion). `baseline_suffix` selects `-ids.txt` (default) or
+`-paths.txt`.
+
+```python
+exit_code = gate_keys("f30", {"F30:my_new_tool"}, REMEDIATION)                     # → f30-ids.txt
+exit_code = gate_keys("f89", static_globs, REMEDIATION, baseline_suffix="-paths.txt")  # → f89-paths.txt
+```
+
+### `min_len` floor override on the ratchet vagueness check
+
+`is_vague_reason` and `parse_overrides` now take an optional keyword-only
+`min_len`, defaulting to `OVERRIDE_MIN_REASON_LEN` (=40). tc-agent-zone's shell
+directives use a 10-char floor, so its checks call `min_len=10`. The constant is
+unchanged and the default-arg behaviour is byte-identical to v0.1.0 — the lower
+floor is a per-call choice, never a mutation of the shared default kairix depends
+on.
+
+```python
+is_vague_reason("x" * 10)               # True  — vague at the default 40-floor
+is_vague_reason("x" * 10, min_len=10)   # False — clears taz's 10-floor
+```
+
+### Discovery helpers (`REPO_ROOT` / `python_files` / `repo_relative`) cover taz unchanged
+
+tc-agent-zone reimplements `REPO_ROOT = Path(__file__).resolve().parents[2]` inline
+in each check. The package's CWD-anchored `REPO_ROOT = Path.cwd()` is the correct
+shared replacement: it resolves to the consumer repo root in the `safe-commit.sh`
+/ pre-commit / CI invocation paths (where checks run *from* the repo root), and
+every gating helper accepts an explicit `repo_root=` for the rare case that
+assumption doesn't hold. No additive gap was found here — `python_files`,
+`repo_relative`, and `main_entry` already cover taz's `.py` discovery.
+
 ## How repositories consume it
 
 Pin to a tag in your `pyproject.toml` (git install — no PyPI publish):
@@ -86,17 +170,21 @@ Pin to a tag in your `pyproject.toml` (git install — no PyPI publish):
 ```toml
 [project.optional-dependencies]
 dev = [
-  "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.1.0",
+  # kairix stays on v0.1.0 (the additions are a no-op for it); tc-agent-zone
+  # pins v0.2.0 for the gate_keys / remediation / run-marker / min_len surface.
+  "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.2.0",
 ]
 ```
 
 or, equivalently, on the command line:
 
 ```bash
-pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.1.0"
+pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.2.0"
 ```
 
 Always pin a tag, never `@main` — the version is the contract the gates depend on.
+Because v0.2.0 is an additive superset, a consumer already pinned to `@v0.1.0`
+keeps working unchanged; bump to `@v0.2.0` only when you need the new surface.
 
 ## Drift reconciliation
 
