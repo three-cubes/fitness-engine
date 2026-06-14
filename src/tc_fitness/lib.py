@@ -54,12 +54,44 @@ def _baseline_dir(repo_root: Path) -> Path:
     return repo_root / ".architecture" / "baseline"
 
 
+def _print_stale_failure(
+    name: str,
+    stale: list[object],
+    stale_remediation: str | None,
+    *,
+    kind: str,
+) -> None:
+    """Print the canonical STALE-baseline FAIL block for ``gate`` / ``gate_keys``.
+
+    Single-sourced so both gates emit identical framing; the consumer supplies
+    the remediation text (no engine-baked wording)."""
+    print(f"{_RED}FAIL [arch:{name}]{_RESET} — stale baseline {kind}(s) no longer in the current scan:")
+    for s in stale:
+        print(f"  {s}: STALE — remove this line from the baseline.")
+    if stale_remediation:
+        print()
+        print(stale_remediation)
+
+
+def _print_pass_counts(name: str, *, new_count: int, grandfathered: int) -> None:
+    """Print the pass banner with new-vs-grandfathered counts (v0.4.0)."""
+    if grandfathered > 0:
+        print(
+            f"{_YELLOW}ok [arch:{name}]{_RESET} — {new_count} new, "
+            f"{grandfathered} grandfathered (still present in baseline)."
+        )
+    else:
+        print(f"{_GREEN}ok [arch:{name}]{_RESET} — clean ({new_count} new, 0 grandfathered).")
+
+
 def gate(
     name: str,
     current: set[Path],
     remediation: str,
     *,
     repo_root: Path | None = None,
+    fail_on_stale: bool = False,
+    stale_remediation: str | None = None,
 ) -> int:
     """Compare current violations against the baseline; print + return exit code.
 
@@ -70,10 +102,17 @@ def gate(
         remediation: operator-actionable remediation hint.
         repo_root: repo root to resolve the baseline against and to relativise
             absolute paths. Defaults to :data:`REPO_ROOT` (the CWD).
+        fail_on_stale: when ``True`` (v0.4.0), a baseline entry that no longer
+            appears in ``current`` is STALE and FAILs the gate (the consumer
+            supplies ``stale_remediation``). Default ``False`` preserves the
+            v0.1.0 "shrinks are clean" exit-code contract byte-identically.
+        stale_remediation: the operator-actionable text printed under a stale
+            FAIL. Single-sourced from the consumer — no engine-baked wording.
 
     Returns:
-        ``0`` if no NEW violations (baseline matches or shrinks); ``1`` if NEW
-        violations were introduced.
+        ``0`` if no NEW violations (and, when ``fail_on_stale``, no stale
+        entries); ``1`` if NEW violations were introduced OR a stale baseline
+        entry was found.
     """
     root = repo_root if repo_root is not None else REPO_ROOT
     baseline_file = _baseline_dir(root) / f"{name}-files.txt"
@@ -107,6 +146,15 @@ def gate(
         )
         return 1
 
+    if fail_on_stale:
+        stale = sorted(baseline - current_rel)
+        if stale:
+            _print_stale_failure(name, list(stale), stale_remediation, kind="file")
+            return 1
+        _print_pass_counts(name, new_count=0, grandfathered=len(baseline))
+        return 0
+
+    # Default path: byte-identical to v0.1.0 (no counts banner change).
     remaining = len(baseline)
     if remaining > 0:
         print(f"{_YELLOW}ok [arch:{name}]{_RESET} — {remaining} grandfathered file(s) still present in baseline.")
@@ -122,6 +170,8 @@ def gate_keys(
     *,
     repo_root: Path | None = None,
     baseline_suffix: str = "-ids.txt",
+    fail_on_stale: bool = False,
+    stale_remediation: str | None = None,
 ) -> int:
     """Ratchet an arbitrary set of *string keys* against a baseline file.
 
@@ -147,10 +197,15 @@ def gate_keys(
             select ``-ids.txt`` (logical ids, the default) or ``-paths.txt``
             (path-globs) per its key kind. The baseline is read from
             ``.architecture/baseline/<name><baseline_suffix>``.
+        fail_on_stale: when ``True`` (v0.4.0), a baseline key no longer in
+            ``current`` is STALE and FAILs (the consumer supplies
+            ``stale_remediation``). Default ``False`` keeps the shrinks-are-clean
+            contract byte-identically.
+        stale_remediation: the text printed under a stale FAIL.
 
     Returns:
-        ``0`` if no NEW keys (baseline matches or shrinks); ``1`` if NEW keys
-        were introduced.
+        ``0`` if no NEW keys (and, when ``fail_on_stale``, no stale keys);
+        ``1`` if NEW keys were introduced OR a stale baseline key was found.
     """
     root = repo_root if repo_root is not None else REPO_ROOT
     baseline_file = _baseline_dir(root) / f"{name}{baseline_suffix}"
@@ -183,6 +238,15 @@ def gate_keys(
         )
         return 1
 
+    if fail_on_stale:
+        stale = sorted(baseline - current)
+        if stale:
+            _print_stale_failure(name, list(stale), stale_remediation, kind="key")
+            return 1
+        _print_pass_counts(name, new_count=0, grandfathered=len(baseline))
+        return 0
+
+    # Default path: byte-identical to v0.2.0 (no counts banner change).
     remaining = len(baseline)
     if remaining > 0:
         print(f"{_YELLOW}ok [arch:{name}]{_RESET} — {remaining} grandfathered key(s) still present in baseline.")

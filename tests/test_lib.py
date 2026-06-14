@@ -89,6 +89,114 @@ def test_gate_relativises_absolute_paths(tmp_path: Path) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# gate(fail_on_stale=True) + counts banner — Task 1.7
+#
+# Generalises taz's per-check stale-baseline behaviour: a baseline entry no
+# longer present in the current scan is STALE and FAILs (consumer supplies the
+# remediation); on pass the banner reports new-vs-grandfathered counts. The
+# default (fail_on_stale=False) preserves the v0.1.0 exit-code contract.
+# --------------------------------------------------------------------------- #
+
+
+def test_gate_fail_on_stale_fails_when_baseline_entry_no_longer_violates(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_dir = tmp_path / ".architecture" / "baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "rule-x-files.txt").write_text("kairix/resolved.py\nkairix/still.py\n")
+    # Only kairix/still.py still violates → kairix/resolved.py is STALE.
+    rc = gate(
+        "rule-x",
+        {Path("kairix/still.py")},
+        "fix it",
+        repo_root=tmp_path,
+        fail_on_stale=True,
+        stale_remediation="REMOVE-STALE-LINE",
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "kairix/resolved.py" in out
+    assert "REMOVE-STALE-LINE" in out
+    assert "STALE" in out or "stale" in out
+
+
+def test_gate_fail_on_stale_passes_and_prints_counts_when_no_stale(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    baseline_dir = tmp_path / ".architecture" / "baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "rule-x-files.txt").write_text("kairix/a.py\nkairix/b.py\n")
+    rc = gate(
+        "rule-x",
+        {Path("kairix/a.py"), Path("kairix/b.py")},
+        "fix it",
+        repo_root=tmp_path,
+        fail_on_stale=True,
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    # The counts banner reports new (0) vs grandfathered (2).
+    assert "0" in out and "2" in out
+    assert "grandfathered" in out
+
+
+def test_gate_fail_on_stale_default_false_is_unchanged(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # With the default (fail_on_stale=False), a baseline entry that no longer
+    # violates is SILENTLY tolerated (the v0.1.0 shrinks-are-clean contract).
+    baseline_dir = tmp_path / ".architecture" / "baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "rule-x-files.txt").write_text("kairix/resolved.py\nkairix/still.py\n")
+    rc = gate("rule-x", {Path("kairix/still.py")}, "fix it", repo_root=tmp_path)
+    out = capsys.readouterr().out
+    assert rc == 0  # stale entry tolerated, no FAIL
+    assert "STALE" not in out
+
+
+def test_gate_net_new_still_fails_under_fail_on_stale(tmp_path: Path) -> None:
+    # A net-new violation FAILs regardless of fail_on_stale.
+    baseline_dir = tmp_path / ".architecture" / "baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "rule-x-files.txt").write_text("kairix/legacy.py\n")
+    rc = gate(
+        "rule-x",
+        {Path("kairix/legacy.py"), Path("kairix/new.py")},
+        "fix it",
+        repo_root=tmp_path,
+        fail_on_stale=True,
+        stale_remediation="rem",
+    )
+    assert rc == 1
+
+
+def test_gate_keys_fail_on_stale(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    baseline_dir = tmp_path / ".architecture" / "baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "f30-ids.txt").write_text("F30:resolved\nF30:still\n")
+    rc = gate_keys(
+        "f30",
+        {"F30:still"},
+        "fix it",
+        repo_root=tmp_path,
+        fail_on_stale=True,
+        stale_remediation="REMOVE-STALE-ID",
+    )
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "F30:resolved" in out
+    assert "REMOVE-STALE-ID" in out
+
+
+def test_gate_keys_fail_on_stale_default_false_unchanged(tmp_path: Path) -> None:
+    baseline_dir = tmp_path / ".architecture" / "baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "f30-ids.txt").write_text("F30:resolved\nF30:still\n")
+    rc = gate_keys("f30", {"F30:still"}, "fix it", repo_root=tmp_path)
+    assert rc == 0  # shrinks-are-clean by default
+
+
+# --------------------------------------------------------------------------- #
 # python_files() / repo_relative() / main_entry() — kairix enumeration
 # --------------------------------------------------------------------------- #
 
