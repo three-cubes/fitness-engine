@@ -6,7 +6,7 @@ helper code those repos' fitness-function checks previously maintained as two
 parallel, slowly-drifting copies. Consuming it means a fix or a behaviour change
 lands once, not twice.
 
-It ships two modules:
+It ships these modules:
 
 - **`tc_fitness.lib`** — the merged check helpers:
   - **baseline gating** (from kairix `scripts/checks/_arch_lib.py`):
@@ -16,6 +16,14 @@ It ships two modules:
 - **`tc_fitness.ratchet`** — the unified ratchet grammar: one override
   min-length, one marker parser, one suppression grammar (see
   *Drift reconciliation* below).
+- **`tc_fitness.runner`** *(v0.3.0)* — the catalogue-driven, repo-agnostic check
+  **runner**: in-process dispatch for python checks + guarded (optionally
+  parallel) subprocess dispatch for shell checks, the named verdict ledger,
+  `--all` / `--gate` / `--staged` modes, and the thin-consumer `main_cli` /
+  programmatic `run` API. Supported by `tc_fitness.catalogue` (the `RuleEntry`
+  schema), `tc_fitness.context` (the shared file-index + AST parse/walk cache),
+  and `tc_fitness.staged` (the sound per-rule staged selection). See *The
+  runner (v0.3.0)* below.
 
 ## What's in the box
 
@@ -185,6 +193,80 @@ pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-en
 Always pin a tag, never `@main` — the version is the contract the gates depend on.
 Because v0.2.0 is an additive superset, a consumer already pinned to `@v0.1.0`
 keeps working unchanged; bump to `@v0.2.0` only when you need the new surface.
+
+## The runner (v0.3.0)
+
+v0.3.0 adds a **single, common, repo-agnostic check runner** that both kairix
+and tc-agent-zone point their `run_checks.py` at — the structural keystone of
+"one common fitness process for all repos". It is purely additive: the v0.1.0 /
+v0.2.0 lib + ratchet surface is untouched.
+
+### Thin-consumer API
+
+A consumer repo declares its own `tuple[RuleEntry, ...]` catalogue and its check
+modules, then its `run_checks.py` collapses to:
+
+```python
+from tc_fitness.runner import main_cli
+from .catalogue import RULES
+raise SystemExit(main_cli(RULES))
+```
+
+`main_cli` parses `--all` / `--staged` / `--gate <id>` and returns the process
+exit code. For tests and embedding there is a programmatic
+`run(rules, *, mode, staged_files=None, repo_root=None, ...) -> Verdicts`.
+
+### What the runner does
+
+- **In-process dispatch** for python checks (`check_<x>.py` exposing
+  `main() -> int`): the module is imported and `main()` is called inside one
+  process, sharing a single `CheckContext` whose AST cache parses every file at
+  most once. A check that raises is isolated into a FAIL — one crash never
+  aborts the ledger.
+- **Guarded subprocess dispatch** for `*.sh` shell detectors. Sequential by
+  default (byte-identical interleaving with kairix's runner); pass
+  `parallel_subprocess=True` to run them on a `ThreadPoolExecutor` with output
+  buffered and replayed in catalogue order (tc-agent-zone's parallelism).
+- **The named verdict ledger** — a `run [id]` line and a `PASS [id]` / `FAIL
+  [id]` verdict per rule, then the aggregate verdict; the format kairix's F83
+  gate-runner contract depends on.
+- **`--all`** (dispatchable AND `run_all`), **`--gate <id>`** (one rule), and
+  **`--staged`** — the *sound* per-rule staged selection (file-local /
+  relational / always-run), single-sourced on each `RuleEntry`. The hard
+  invariant is **no false negative on a staged change**: when scope can't be
+  resolved, the rule runs (fail-safe).
+- A **paved-road footer hook** so a failing rule can point an agent at the
+  consumer's own query surface.
+
+### Repo-agnostic by injection
+
+The runner never imports `kairix` or `tc-agent-zone`. Repo-specific behaviour is
+injected through `RunnerConfig` seams:
+
+| Seam | Purpose |
+|---|---|
+| `repo_root` / `checks_dir` | where the repo + its check scripts live |
+| `scope_resolver` | derive a rule's staged scope from its check script (the repo's FitnessRule-aware hook) when `staged_scope` is unset |
+| `enumeration_narrower` | the repo's extra file-index narrowing for file-local staged runs, layered on top of the package-level `tc_fitness.python_files` narrowing |
+| `conditional_check` | govern a `subprocess_arg_env` rule's runtime arg + exact skip text (e.g. a coverage check that needs a Cobertura XML) |
+| `paved_road_footer` | the affordance line printed under a FAIL |
+| `parallel_subprocess` | run shell checks on a thread pool |
+
+`RuleEntry.id` is id-agnostic — it accepts kairix's `"F26"` and tc-agent-zone's
+`"no-duplicate-string"` style equally; the runner only uses it as a ledger label
+and the `--gate` selector. `category` / `scope` are open `str` fields each repo
+curates its own closed vocabulary for.
+
+### Drop-in for kairix's local runner
+
+The runner is byte-identical to kairix's current `scripts/checks/run_checks.py`:
+wiring kairix's `_check_context` / `_staged_selection` / `_rule_catalogue` into
+`main_cli` via the seams above reproduces the **same verdicts and the same
+named-ledger text** for `--all`, `--gate`, and `--staged` (verified by diffing
+the two runners' output over the full catalogue, including file-local staged
+narrowing). kairix's migration is therefore mechanical: translate its `RuleEntry`
+rows to the package schema, pass its three helper modules as hooks, and collapse
+`run_checks.py` to the three-line form.
 
 ## Drift reconciliation
 
