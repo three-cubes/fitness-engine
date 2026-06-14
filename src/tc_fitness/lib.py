@@ -115,6 +115,82 @@ def gate(
     return 0
 
 
+def gate_keys(
+    name: str,
+    current: set[str],
+    remediation: str,
+    *,
+    repo_root: Path | None = None,
+    baseline_suffix: str = "-ids.txt",
+) -> int:
+    """Ratchet an arbitrary set of *string keys* against a baseline file.
+
+    The string-keyed sibling of :func:`gate`. Where :func:`gate` keys on
+    working-tree :class:`~pathlib.Path` objects (relativising absolute paths
+    under ``repo_root``), this keys on opaque string identifiers — logical rule
+    ids (``F30``), path-globs (``kairix/**/web/static/*``), or any other token
+    that is NOT a real file path. Net-new keys fail; baseline keys are
+    grandfathered; the set shrinking is always clean. Same exit-code contract as
+    :func:`gate`.
+
+    tc-agent-zone has 13 checks whose baseline KEY is a logical id (``-ids.txt``)
+    or a path-glob (``-paths.txt``) rather than a working-tree file path; those
+    checks ratchet through this helper.
+
+    Args:
+        name: short rule name (used in messages and baseline filename).
+        current: set of string keys currently in violation.
+        remediation: operator-actionable remediation hint.
+        repo_root: repo root to resolve the baseline against. Defaults to
+            :data:`REPO_ROOT` (the CWD).
+        baseline_suffix: filename suffix for the baseline file, so a check can
+            select ``-ids.txt`` (logical ids, the default) or ``-paths.txt``
+            (path-globs) per its key kind. The baseline is read from
+            ``.architecture/baseline/<name><baseline_suffix>``.
+
+    Returns:
+        ``0`` if no NEW keys (baseline matches or shrinks); ``1`` if NEW keys
+        were introduced.
+    """
+    root = repo_root if repo_root is not None else REPO_ROOT
+    baseline_file = _baseline_dir(root) / f"{name}{baseline_suffix}"
+    if baseline_file.exists():
+        baseline = {
+            line.strip()
+            for line in baseline_file.read_text().splitlines()
+            if line.strip() and not line.startswith("#")
+        }
+    else:
+        baseline = set()
+
+    new = sorted(current - baseline)
+
+    if new:
+        print(f"{_RED}FAIL [arch:{name}]{_RESET} — new violation(s) introduced:")
+        for key in new:
+            print(f"  {key}")
+        print()
+        print(remediation)
+        print()
+        try:
+            baseline_rel = baseline_file.relative_to(root)
+        except ValueError:
+            baseline_rel = baseline_file
+        print(
+            "If this is genuinely the only practical fix, document why in the\n"
+            f"PR description and append the key to {baseline_rel}\n"
+            "(but expect pushback at review time — adding to the baseline is rare)."
+        )
+        return 1
+
+    remaining = len(baseline)
+    if remaining > 0:
+        print(f"{_YELLOW}ok [arch:{name}]{_RESET} — {remaining} grandfathered key(s) still present in baseline.")
+    else:
+        print(f"{_GREEN}ok [arch:{name}]{_RESET} — clean.")
+    return 0
+
+
 def repo_relative(path: Path, *, repo_root: Path | None = None) -> Path:
     """Convert an absolute path under the repo root to a repo-relative Path."""
     root = repo_root if repo_root is not None else REPO_ROOT
@@ -160,14 +236,61 @@ def main_entry(
 # ---------------------------------------------------------------------------
 
 
-def actionable(what: str, fix: str, nxt: str) -> str:
+def actionable(what: str, fix: str, nxt: str, run: str | None = None) -> str:
     """Format an agent-actionable single-line failure.
 
-    Shape: ``<what>; fix: <fix>; next: <nxt>``. Standardising the shape lets the
-    actionable-feedback parser keep up without chasing each call site's bespoke
-    formatting.
+    Shape (default): ``<what>; fix: <fix>; next: <nxt>``. Standardising the shape
+    lets the actionable-feedback parser keep up without chasing each call site's
+    bespoke formatting.
+
+    When ``run`` is supplied, a third ``; run: <run>`` marker is appended,
+    yielding the 3-marker ``<what>; fix: <fix>; next: <nxt>; run: <run>`` form
+    that tc-agent-zone's 59 fix/next/run checks emit. ``run`` defaults to
+    ``None``, so the 2-marker v0.1.0 output is byte-identical for every existing
+    call site.
     """
-    return f"{what}; fix: {fix}; next: {nxt}"
+    base = f"{what}; fix: {fix}; next: {nxt}"
+    if run is None:
+        return base
+    return f"{base}; run: {run}"
+
+
+def remediation(
+    fix: str,
+    nxt: str,
+    run: str,
+    *,
+    passing: str | None = None,
+    forbidden: str | None = None,
+) -> str:
+    """Format the multiline ``fix:`` / ``next:`` / ``run:`` remediation block.
+
+    The F21-shape block tc-agent-zone's 30 checks emit alongside a failure: the
+    three action markers on their own lines, optionally followed by a ``Pass``
+    example and a ``Forbidden`` example. Returns the joined block as one string
+    (no trailing newline), ready to ``print()``.
+
+    Example output::
+
+        fix: redact the secret before logging
+        next: re-run the check
+        run: python scripts/checks/check_f15.py
+        Pass: logger.info("token redacted")
+        Forbidden: logger.info(f"token={token}")
+
+    Args:
+        fix: the corrective action.
+        nxt: the follow-up step after fixing.
+        run: the exact command to re-verify.
+        passing: optional Pass-example line (omitted when ``None``).
+        forbidden: optional Forbidden-example line (omitted when ``None``).
+    """
+    lines = [f"fix: {fix}", f"next: {nxt}", f"run: {run}"]
+    if passing is not None:
+        lines.append(f"Pass: {passing}")
+    if forbidden is not None:
+        lines.append(f"Forbidden: {forbidden}")
+    return "\n".join(lines)
 
 
 def emit_failures(check_name: str, fails: list[str], stream: Any = None) -> None:
@@ -213,10 +336,12 @@ def missing_keys(parsed: dict, required: tuple[str, ...]) -> list[str]:
 __all__ = [
     "REPO_ROOT",
     "gate",
+    "gate_keys",
     "repo_relative",
     "python_files",
     "main_entry",
     "actionable",
+    "remediation",
     "emit_failures",
     "emit_pass",
     "load_yaml",

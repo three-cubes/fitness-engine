@@ -69,6 +69,69 @@ def test_trailing_dot_and_whitespace_stripped_before_measuring() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# min_len floor override (additive) — taz shell directives use 10
+# --------------------------------------------------------------------------- #
+
+
+def test_is_vague_reason_default_min_len_is_unchanged() -> None:
+    # v0.1.0 contract: with min_len omitted the floor is OVERRIDE_MIN_REASON_LEN
+    # (=40). A 39-char reason is vague, a 40-char reason is not — byte-identical
+    # to the default-arg behaviour the existing tests above already pin.
+    assert is_vague_reason("x" * 39) is True
+    assert is_vague_reason("x" * 40) is False
+
+
+def test_is_vague_reason_floor_override_to_ten() -> None:
+    # taz passes min_len=10: a 10-char reason that was vague at the 40-floor is
+    # now acceptable, while a 9-char reason is still vague.
+    ten = "x" * 10
+    nine = "x" * 9
+    assert is_vague_reason(ten) is True  # vague under the default 40-floor
+    assert is_vague_reason(ten, min_len=10) is False  # not vague under taz's 10-floor
+    assert is_vague_reason(nine, min_len=10) is True  # 9 < 10 still vague
+
+
+def test_min_len_override_still_strips_dot_and_whitespace() -> None:
+    # 9 substantive chars + dot + spaces is still 9 → vague at min_len=10.
+    assert is_vague_reason("  " + ("y" * 9) + ".  ", min_len=10) is True
+    assert is_vague_reason("  " + ("y" * 10) + ".  ", min_len=10) is False
+
+
+def test_min_len_override_does_not_bypass_vague_lead_in_tokens() -> None:
+    # The vague lead-in set (WIP/TODO/...) is independent of the length floor:
+    # a long-enough reason that starts with a vague token is still vague even
+    # when min_len is lowered.
+    assert is_vague_reason("WIP and then some more words here", min_len=10) is True
+
+
+def test_constant_unchanged_at_forty() -> None:
+    # The constant stays 40 — taz lowers the floor per-call, it does NOT mutate
+    # the shared default that kairix's @v0.1.0 gates depend on.
+    assert OVERRIDE_MIN_REASON_LEN == 40
+
+
+def test_parse_overrides_default_min_len_unchanged() -> None:
+    # v0.1.0 call shape (no min_len): a short reason is still marked vague at 40.
+    line = "coverage-ratchet-acknowledged: scripts/x.py — short reason here"
+    overrides = parse_overrides(line, COVERAGE_OVERRIDE_RE)
+    assert len(overrides) == 1
+    assert overrides[0].vague is True  # "short reason here" is < 40 chars
+
+
+def test_parse_overrides_forwards_min_len_to_vague_check() -> None:
+    # With min_len=10 the same short reason clears the floor → not vague.
+    line = "coverage-ratchet-acknowledged: scripts/x.py — short reason here"
+    overrides = parse_overrides(line, COVERAGE_OVERRIDE_RE, min_len=10)
+    assert len(overrides) == 1
+    assert overrides[0].vague is False
+    # A still-too-short reason (< 10) remains vague even at the lowered floor.
+    short = parse_overrides(
+        "coverage-ratchet-acknowledged: scripts/x.py — tiny", COVERAGE_OVERRIDE_RE, min_len=10
+    )
+    assert short[0].vague is True  # "tiny" is 4 chars < 10
+
+
+# --------------------------------------------------------------------------- #
 # Drift zone 3 — em-dash AND hyphen both accepted
 # --------------------------------------------------------------------------- #
 
