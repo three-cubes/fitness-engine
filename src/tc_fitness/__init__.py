@@ -1,26 +1,31 @@
 """three-cubes-fitness — shared architecture-fitness primitives.
 
 The merged core consumed by Three Cubes repos (kairix, tc-agent-zone). It carries
-the baseline-gating helpers and agent-actionable emit/YAML helpers (:mod:`lib`)
-plus the unified ratchet grammar (:mod:`ratchet`) that reconciles the three drift
-zones between the two repos' independently-grown ratchet gates.
+the baseline-gating helpers and agent-actionable emit/YAML helpers (:mod:`lib`),
+the unified ratchet grammar (:mod:`ratchet`), and — from v0.3.0 — the
+catalogue-driven, repo-agnostic RUNNER (:mod:`runner`, :mod:`context`,
+:mod:`staged`, :mod:`catalogue`) that both repos point their ``run_checks.py`` at.
 
 Pin to a git tag when consuming::
 
-    pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.2.0"
+    pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.3.0"
 
-v0.2.0 is an additive, backward-compatible superset of v0.1.0: every v0.1.0
-signature and behaviour is unchanged with defaults. The additions cover
-tc-agent-zone's check surface — the 3-marker ``run:`` form on
-:func:`~tc_fitness.lib.actionable`, the multiline :func:`~tc_fitness.lib.remediation`
-block, the string-keyed :func:`~tc_fitness.lib.gate_keys`, and the ``min_len``
-floor override on :func:`~tc_fitness.ratchet.is_vague_reason` /
-:func:`~tc_fitness.ratchet.parse_overrides`. kairix may keep its ``@v0.1.0`` pin
-unchanged.
+v0.3.0 is additive over v0.2.0: every v0.1.0 / v0.2.0 signature and behaviour is
+unchanged. The runner is a new, optional surface — a consumer's ``run_checks.py``
+collapses to ``from tc_fitness.runner import main_cli; from .catalogue import
+RULES; raise SystemExit(main_cli(RULES))``. The lib + ratchet modules are
+untouched, so a consumer pinned to ``@v0.1.0`` / ``@v0.2.0`` keeps working.
 """
 
 from __future__ import annotations
 
+from tc_fitness.catalogue import (
+    PROPOSED_STATUS,
+    RuleEntry,
+    StagedClass,
+    is_dispatchable,
+)
+from tc_fitness.context import CheckContext
 from tc_fitness.lib import (
     REPO_ROOT,
     actionable,
@@ -49,8 +54,30 @@ from tc_fitness.ratchet import (
     make_override_re,
     parse_overrides,
 )
+from tc_fitness.runner import (
+    ConditionalCheck,
+    ConditionalResult,
+    PavedRoadFooter,
+    RunnerConfig,
+    Verdicts,
+    main_cli,
+    resolve_script,
+    run,
+    staged_paths,
+)
+from tc_fitness.staged import (
+    EnumerationNarrower,
+    ScopeResolver,
+    StagedDecision,
+    decide,
+    filter_to_staged,
+    resolve_staged_scope,
+    restrict_python_files,
+    staged_abs_set,
+    staged_in_scope,
+)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
@@ -80,4 +107,31 @@ __all__ = [
     "BARE_SUPPRESSION_PATTERNS",
     "contains_suppression",
     "is_bare_suppression",
+    # catalogue (schema)
+    "RuleEntry",
+    "StagedClass",
+    "PROPOSED_STATUS",
+    "is_dispatchable",
+    # context
+    "CheckContext",
+    # staged selection
+    "ScopeResolver",
+    "EnumerationNarrower",
+    "StagedDecision",
+    "decide",
+    "resolve_staged_scope",
+    "staged_in_scope",
+    "filter_to_staged",
+    "staged_abs_set",
+    "restrict_python_files",
+    # runner
+    "Verdicts",
+    "RunnerConfig",
+    "PavedRoadFooter",
+    "ConditionalCheck",
+    "ConditionalResult",
+    "resolve_script",
+    "staged_paths",
+    "run",
+    "main_cli",
 ]

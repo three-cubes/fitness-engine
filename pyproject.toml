@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "three-cubes-fitness"
-version = "0.2.0"
-description = "Shared architecture-fitness primitives for Three Cubes repos (kairix, tc-agent-zone): baseline-gating helpers, agent-actionable emit/YAML helpers, and the unified ratchet grammar."
+version = "0.3.0"
+description = "Shared architecture-fitness primitives for Three Cubes repos (kairix, tc-agent-zone): baseline-gating helpers, agent-actionable emit/YAML helpers, the unified ratchet grammar, and the catalogue-driven repo-agnostic check runner."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }
