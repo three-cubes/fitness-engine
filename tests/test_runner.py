@@ -607,6 +607,78 @@ def test_conditional_factory_wires_into_runner_skip(
     assert "skip [COVE] check-cov.sh — coverage report not found" in out
 
 
+def test_conditional_factory_per_entry_skip_line_differs_by_id(tmp_path: Path) -> None:
+    # DEFECT-1 regression: F7 and F9 share ONE script (check_per_file_coverage.py)
+    # and differ ONLY by entry.id. A static skip tuple emits IDENTICAL text for
+    # both; the per-entry callable interpolates `skip [{entry.id}]` so the two
+    # produced lines differ — the byte-identity ledger contract for shared-script
+    # rules. The fn form must win, receive the RuleEntry, and resolve per id.
+    hook = make_env_path_conditional_check(
+        env_var="MY_COV_XML",
+        default_rel="nope.xml",  # absent → exercise the absent-skip path
+        repo_root=tmp_path,
+        absent_skip_line_fn=lambda e: (
+            f"skip [{e.id}] check_per_file_coverage.py — coverage report not found",
+            f"   run: pytest --cov first ({e.id})",
+        ),
+    )
+    f7 = RuleEntry(
+        id="F7", gate="f7", check="per_file_coverage",
+        script="check_per_file_coverage.py", subprocess_arg_env="MY_COV_XML",
+    )
+    f9 = RuleEntry(
+        id="F9", gate="f9", check="per_file_coverage",
+        script="check_per_file_coverage.py", subprocess_arg_env="MY_COV_XML",
+    )
+    r7 = hook(f7)
+    r9 = hook(f9)
+    assert r7 is not None and r9 is not None
+    assert r7.run is False and r9.run is False
+    assert r7.skip_lines == (
+        "skip [F7] check_per_file_coverage.py — coverage report not found",
+        "   run: pytest --cov first (F7)",
+    )
+    assert r9.skip_lines == (
+        "skip [F9] check_per_file_coverage.py — coverage report not found",
+        "   run: pytest --cov first (F9)",
+    )
+    # The two skip ledgers are DISTINCT despite sharing one script.
+    assert r7.skip_lines != r9.skip_lines
+
+
+def test_conditional_factory_force_skip_line_fn_receives_entry(tmp_path: Path) -> None:
+    # DEFECT-1: the forced-skip path also accepts a per-entry callable that wins
+    # over the static tuple and interpolates the id.
+    (tmp_path / "coverage.xml").write_text("<coverage/>")  # present, but forced
+    hook = make_env_path_conditional_check(
+        env_var="MY_COV_XML",
+        default_rel="coverage.xml",
+        repo_root=tmp_path,
+        force_skip=lambda: True,
+        force_skip_line_fn=lambda e: (f"skip [{e.id}] check_per_file_coverage.py — --skip-coverage",),
+    )
+    r7 = hook(RuleEntry(id="F7", gate="f7", check="cov", subprocess_arg_env="MY_COV_XML"))
+    r9 = hook(RuleEntry(id="F9", gate="f9", check="cov", subprocess_arg_env="MY_COV_XML"))
+    assert r7 is not None and r9 is not None
+    assert r7.skip_lines == ("skip [F7] check_per_file_coverage.py — --skip-coverage",)
+    assert r9.skip_lines == ("skip [F9] check_per_file_coverage.py — --skip-coverage",)
+
+
+def test_conditional_factory_fn_wins_over_static_tuple(tmp_path: Path) -> None:
+    # DEFECT-1: precedence — when both the static tuple and the fn are supplied,
+    # the fn wins (per-entry interpolation supersedes the fixed text).
+    hook = make_env_path_conditional_check(
+        env_var="MY_COV_XML",
+        default_rel="nope.xml",
+        repo_root=tmp_path,
+        absent_skip_lines=("static — WRONG",),
+        absent_skip_line_fn=lambda e: (f"skip [{e.id}] — dynamic wins",),
+    )
+    r = hook(RuleEntry(id="F7", gate="f7", check="cov", subprocess_arg_env="MY_COV_XML"))
+    assert r is not None
+    assert r.skip_lines == ("skip [F7] — dynamic wins",)
+
+
 # --------------------------------------------------------------------------- #
 # main_cli extra_flags + post_parse — consumer-specific flags (Task 1.4)
 #

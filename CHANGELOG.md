@@ -48,12 +48,18 @@ into a default.
   kairix-specific residue — patch *this* ABC's `enumerate_files` — is the
   optional `extra_method=(SomeClass, "enumerate_files")` argument.
 - **`tc_fitness.runner.make_env_path_conditional_check(*, env_var, default_rel,
-  repo_root, force_skip=None, force_skip_lines=(), absent_skip_lines=())`** — a
-  declarative `ConditionalCheck` factory generalising kairix's
-  `_make_conditional_check`: resolves a runtime-arg path from an env var (else a
-  repo-relative default), returns a `ConditionalResult` that runs with the path
-  appended, or skips with the consumer's exact skip lines when forced
-  (`--skip-coverage`-style) or absent.
+  repo_root, force_skip=None, force_skip_lines=(), absent_skip_lines=(),
+  force_skip_line_fn=None, absent_skip_line_fn=None)`** — a declarative
+  `ConditionalCheck` factory generalising kairix's `_make_conditional_check`:
+  resolves a runtime-arg path from an env var (else a repo-relative default),
+  returns a `ConditionalResult` that runs with the path appended, or skips with
+  the consumer's exact skip lines when forced (`--skip-coverage`-style) or
+  absent. The `*_skip_line_fn` callables receive the `RuleEntry` so two rules
+  SHARING one script and differing only by `entry.id` (kairix's F7/F9, both
+  `check_per_file_coverage.py`) emit DISTINCT `skip [F7]` / `skip [F9]` ledgers
+  instead of one static tuple's identical text — the byte-identity contract for
+  shared-script rules. The fn wins over the static tuple; the tuple stays for
+  the single-rule case. New `SkipLineFn` type alias.
 - **`main_cli(..., extra_flags=(), post_parse=None)`** — `extra_flags` adds
   consumer-specific argparse flags (e.g. kairix's `--skip-coverage`); `post_parse`
   maps the parsed `Namespace` to extra `run()` kwargs (e.g. a

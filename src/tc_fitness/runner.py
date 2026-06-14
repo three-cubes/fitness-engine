@@ -146,6 +146,14 @@ class ConditionalResult:
 ConditionalCheck = Callable[[RuleEntry], "ConditionalResult | None"]
 
 
+#: A per-entry skip-line builder: given the :class:`RuleEntry`, return the exact
+#: lines to print on a skip. Lets a consumer interpolate ``entry.id`` (and any
+#: other field) so two rules SHARING one script — kairix's F7/F9, both
+#: ``check_per_file_coverage.py`` — emit DISTINCT ``skip [F7]`` / ``skip [F9]``
+#: ledgers instead of one static tuple's identical text.
+SkipLineFn = Callable[[RuleEntry], tuple[str, ...]]
+
+
 def make_env_path_conditional_check(
     *,
     env_var: str,
@@ -154,6 +162,8 @@ def make_env_path_conditional_check(
     force_skip: Callable[[], bool] | None = None,
     force_skip_lines: tuple[str, ...] = (),
     absent_skip_lines: tuple[str, ...] = (),
+    force_skip_line_fn: SkipLineFn | None = None,
+    absent_skip_line_fn: SkipLineFn | None = None,
 ) -> ConditionalCheck:
     """Build a :data:`ConditionalCheck` that resolves a runtime-arg PATH.
 
@@ -161,17 +171,30 @@ def make_env_path_conditional_check(
     into declarative config. The returned hook, given a rule:
 
     1. when ``force_skip`` is supplied and returns ``True`` → skip with
-       ``force_skip_lines`` (kairix's ``--skip-coverage`` path), regardless of
-       whether the path exists;
+       ``force_skip_line_fn(entry)`` if given, else ``force_skip_lines``
+       (kairix's ``--skip-coverage`` path), regardless of whether the path
+       exists;
     2. resolve the path from ``env_var`` (when set + non-empty), else
        ``repo_root / default_rel``; if it does not exist → skip with
-       ``absent_skip_lines`` (the "report not found" path);
+       ``absent_skip_line_fn(entry)`` if given, else ``absent_skip_lines`` (the
+       "report not found" path);
     3. otherwise → run with the resolved absolute path appended as a single
        extra arg.
 
+    Per-entry skip text (the byte-identity ledger for shared-script rules)
+    --------------------------------------------------------------------
+    The static tuples are fixed at factory-build time, so two rules that share
+    ONE script and differ only by ``entry.id`` — kairix's F7/F9, both
+    ``check_per_file_coverage.py`` — would emit IDENTICAL skip text where kairix
+    emits distinct ``skip [F7]`` / ``skip [F9]`` lines. The ``*_skip_line_fn``
+    callables receive the :class:`RuleEntry` and interpolate per id, so the
+    factory reproduces kairix's seam (``skip [{entry.id}] {resolve_script(entry)}
+    — …``) byte-for-byte. **Precedence: the ``*_line_fn`` wins when provided**;
+    the static tuple remains for the single-rule case (back-compat).
+
     The env-var name, default relative path, force predicate, and BOTH skip-line
-    sets are CONFIG, so a consumer reproduces its EXACT skip text (the
-    byte-identical-ledger contract). Nothing kairix-specific is baked in.
+    surfaces are CONFIG, so a consumer reproduces its EXACT skip text. Nothing
+    kairix-specific is baked in.
 
     Args:
         env_var: environment variable carrying the path (wins when set).
@@ -179,17 +202,24 @@ def make_env_path_conditional_check(
         repo_root: root the ``default_rel`` resolves under.
         force_skip: zero-arg predicate; ``True`` forces a skip (bound to a flag
             like ``--skip-coverage``). ``None`` disables the force branch.
-        force_skip_lines: the exact lines printed on a forced skip.
-        absent_skip_lines: the exact lines printed when the path is absent.
+        force_skip_lines: the exact lines printed on a forced skip (static).
+        absent_skip_lines: the exact lines printed when the path is absent
+            (static).
+        force_skip_line_fn: per-entry forced-skip line builder; wins over
+            ``force_skip_lines`` when given.
+        absent_skip_line_fn: per-entry absent-skip line builder; wins over
+            ``absent_skip_lines`` when given.
     """
 
     def _hook(entry: RuleEntry) -> ConditionalResult:
         if force_skip is not None and force_skip():
-            return ConditionalResult(run=False, skip_lines=force_skip_lines)
+            lines = force_skip_line_fn(entry) if force_skip_line_fn is not None else force_skip_lines
+            return ConditionalResult(run=False, skip_lines=lines)
         env_value = os.environ.get(env_var)
         candidate = Path(env_value) if env_value else (repo_root / default_rel)
         if not candidate.exists():
-            return ConditionalResult(run=False, skip_lines=absent_skip_lines)
+            lines = absent_skip_line_fn(entry) if absent_skip_line_fn is not None else absent_skip_lines
+            return ConditionalResult(run=False, skip_lines=lines)
         return ConditionalResult(run=True, extra_args=(str(candidate),))
 
     return _hook
@@ -903,6 +933,7 @@ __all__ = [
     "PavedRoadFooter",
     "ConditionalCheck",
     "ConditionalResult",
+    "SkipLineFn",
     "make_env_path_conditional_check",
     "resolve_script",
     "staged_paths",
