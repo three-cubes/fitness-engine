@@ -82,10 +82,28 @@ from tc_fitness.staged import (
     restrict_python_files,
 )
 
-_RED = "\033[0;31m"
-_GREEN = "\033[0;32m"
-_YELLOW = "\033[0;33m"
-_RESET = "\033[0m"
+class Colours:
+    """The ANSI colour codes the named verdict ledger uses — a public namespace.
+
+    Promoted to public API (v0.4.0) so a consumer that builds ledger lines by
+    hand (taz) references ``Colours.GREEN`` etc. instead of importing the private
+    ``_GREEN`` module constants. The values are byte-identical to the prior
+    constants; the underscore names below remain as thin back-compat aliases.
+    """
+
+    RED = "\033[0;31m"
+    GREEN = "\033[0;32m"
+    YELLOW = "\033[0;33m"
+    RESET = "\033[0m"
+
+
+# Back-compat module-level aliases (kept until taz migrates off the private
+# imports in Wave 4). They point at the public ``Colours`` values, so a single
+# change to ``Colours`` is reflected everywhere.
+_RED = Colours.RED
+_GREEN = Colours.GREEN
+_YELLOW = Colours.YELLOW
+_RESET = Colours.RESET
 
 _SHELL_SUFFIX = ".sh"
 
@@ -236,6 +254,13 @@ class RunnerConfig:
     conditional_check: ConditionalCheck | None = None
     parallel_subprocess: bool = False
     max_workers: int = _DEFAULT_MAX_WORKERS
+    #: Dispatch strategy for pure-python checks. ``"inprocess"`` (default,
+    #: v0.3.0 behaviour) imports the module and calls ``main()`` in-process,
+    #: sharing one ``CheckContext`` AST cache. ``"subprocess"`` routes EVERY
+    #: check — python included — through the guarded subprocess path, so a
+    #: consumer with no shared-context requirement (taz) can drop a hand-rolled
+    #: subprocess dispatch. ``.sh`` detectors run as subprocesses either way.
+    dispatch: str = "inprocess"
 
     def __post_init__(self) -> None:
         self.repo_root = self.repo_root.resolve()
@@ -265,6 +290,17 @@ def _dispatches_in_process(entry: RuleEntry) -> bool:
     if entry.subprocess_arg_env is not None:
         return False
     return not resolve_script(entry).endswith(_SHELL_SUFFIX)
+
+
+def _runs_in_process(entry: RuleEntry, cfg: RunnerConfig) -> bool:
+    """Whether ``entry`` runs in-process, honouring ``cfg.dispatch``.
+
+    ``dispatch="subprocess"`` forces EVERY check — python included — onto the
+    guarded subprocess path (taz's pure-consumer mode). Otherwise the v0.3.0
+    per-entry rule (:func:`_dispatches_in_process`) applies."""
+    if cfg.dispatch == "subprocess":
+        return False
+    return _dispatches_in_process(entry)
 
 
 def _conditional_arg_path(entry: RuleEntry, cfg: RunnerConfig) -> Path | None:
@@ -473,14 +509,25 @@ def _run_one_subprocess(entry: RuleEntry, cfg: RunnerConfig) -> int | None:
 # ── selection ────────────────────────────────────────────────────────────
 
 
-def _select_all(rules: tuple[RuleEntry, ...]) -> list[RuleEntry]:
-    """In-scope rules for ``--all``: dispatchable AND ``run_all``."""
+def select_all(rules: tuple[RuleEntry, ...]) -> list[RuleEntry]:
+    """In-scope rules for ``--all``: dispatchable AND ``run_all``.
+
+    Public (v0.4.0) so a consumer building its own dispatch loop selects the
+    same set the runner does, instead of importing the private ``_select_all``.
+    """
     return [e for e in rules if is_dispatchable(e) and e.run_all]
 
 
-def _select_gate(rules: tuple[RuleEntry, ...], gate_id: str) -> list[RuleEntry]:
-    """Rules whose catalogue ``id`` matches ``gate_id`` (case-insensitive)."""
+def select_gate(rules: tuple[RuleEntry, ...], gate_id: str) -> list[RuleEntry]:
+    """Rules whose catalogue ``id`` matches ``gate_id`` (case-insensitive).
+
+    Public (v0.4.0); the ``--gate <id>`` selector a consumer can reuse."""
     return [e for e in rules if e.id.lower() == gate_id.lower() and is_dispatchable(e)]
+
+
+# Back-compat private aliases (kept until taz migrates off the private imports).
+_select_all = select_all
+_select_gate = select_gate
 
 
 def _staged_decisions(
@@ -581,14 +628,14 @@ def _dispatch(entries: list[RuleEntry], cfg: RunnerConfig) -> Verdicts:
     verdict = Verdicts()
     parallel_verdicts: dict[str, int | None] = {}
     if cfg.parallel_subprocess:
-        subproc_entries = [e for e in deduped if not _dispatches_in_process(e)]
+        subproc_entries = [e for e in deduped if not _runs_in_process(e, cfg)]
         if subproc_entries:
             parallel_verdicts = _run_subprocess_parallel(subproc_entries, cfg)
 
     ctx = CheckContext(repo_root=cfg.repo_root)
     with ctx.install():
         for entry in deduped:
-            if _dispatches_in_process(entry):
+            if _runs_in_process(entry, cfg):
                 result: int | None = _run_one_inprocess(entry, cfg)
             elif cfg.parallel_subprocess:
                 result = parallel_verdicts.get(entry.id)
@@ -618,7 +665,7 @@ def _run_staged_one(
     ``enumeration_narrower``, if any) so the in-process check walks ONLY those
     files. Everything else runs over its full natural scope.
     """
-    if not _dispatches_in_process(entry):
+    if not _runs_in_process(entry, cfg):
         return _run_one_subprocess(entry, cfg)
     if decision.scope_files:
         scope_files = list(decision.scope_files)
@@ -670,17 +717,25 @@ def _dispatch_staged(
     return verdict
 
 
-def _print_aggregate(verdict: Verdicts) -> None:
+def print_aggregate(verdict: Verdicts) -> None:
     """Print the final aggregate verdict line for an ``--all`` / ``--gate``
-    dispatch (byte-identical to kairix's runner)."""
+    dispatch (byte-identical to kairix's runner).
+
+    Public (v0.4.0) so a consumer that runs its own dispatch loop emits the
+    SAME aggregate banner the runner does, instead of importing the private
+    ``_print_aggregate``."""
     print()
     if verdict.failures:
         print(
-            f"{_RED}=== Architecture fitness functions FAILED ==={_RESET} "
+            f"{Colours.RED}=== Architecture fitness functions FAILED ==={Colours.RESET} "
             f"({len(verdict.failures)}/{verdict.ran} rule(s) failed: {', '.join(verdict.failures)})"
         )
     else:
-        print(f"{_GREEN}=== All {verdict.ran} architecture fitness functions passed ==={_RESET}")
+        print(f"{Colours.GREEN}=== All {verdict.ran} architecture fitness functions passed ==={Colours.RESET}")
+
+
+# Back-compat private alias (kept until taz migrates off the private import).
+_print_aggregate = print_aggregate
 
 
 # ── git staged paths ─────────────────────────────────────────────────────
@@ -723,13 +778,16 @@ def run(
     conditional_check: ConditionalCheck | None = None,
     parallel_subprocess: bool = False,
     max_workers: int = _DEFAULT_MAX_WORKERS,
+    dispatch: str = "inprocess",
 ) -> Verdicts:
     """Run ``rules`` in ``mode`` and return the :class:`Verdicts`.
 
     ``mode`` is ``"all"`` (default), ``"staged"`` (pass ``staged_files`` to
-    override the ``git`` call), or ``"gate"`` (with ``gate_id``). The injection
-    kwargs map onto :class:`RunnerConfig`. Always prints the named verdict
-    ledger; the return value carries the structured outcome for embedders."""
+    override the ``git`` call), or ``"gate"`` (with ``gate_id``). ``dispatch`` is
+    ``"inprocess"`` (default, v0.3.0) or ``"subprocess"`` (route every check
+    through the guarded subprocess path). The injection kwargs map onto
+    :class:`RunnerConfig`. Always prints the named verdict ledger; the return
+    value carries the structured outcome for embedders."""
     cfg = RunnerConfig(
         repo_root=repo_root if repo_root is not None else Path.cwd(),
         checks_dir=checks_dir,
@@ -739,6 +797,7 @@ def run(
         conditional_check=conditional_check,
         parallel_subprocess=parallel_subprocess,
         max_workers=max_workers,
+        dispatch=dispatch,
     )
 
     if mode == "gate":
@@ -775,6 +834,7 @@ def main_cli(
     conditional_check: ConditionalCheck | None = None,
     parallel_subprocess: bool = False,
     max_workers: int = _DEFAULT_MAX_WORKERS,
+    dispatch: str = "inprocess",
     extra_flags: Sequence[tuple[str, dict[str, object]]] = (),
     post_parse: Callable[[argparse.Namespace], dict[str, object]] | None = None,
 ) -> int:
@@ -819,6 +879,7 @@ def main_cli(
         "conditional_check": conditional_check,
         "parallel_subprocess": parallel_subprocess,
         "max_workers": max_workers,
+        "dispatch": dispatch,
     }
     if post_parse is not None:
         common.update(post_parse(args))
@@ -836,6 +897,7 @@ def main_cli(
 
 
 __all__ = [
+    "Colours",
     "Verdicts",
     "RunnerConfig",
     "PavedRoadFooter",
@@ -844,6 +906,9 @@ __all__ = [
     "make_env_path_conditional_check",
     "resolve_script",
     "staged_paths",
+    "select_all",
+    "select_gate",
+    "print_aggregate",
     "run",
     "main_cli",
 ]

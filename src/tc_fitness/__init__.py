@@ -57,6 +57,7 @@ from tc_fitness.ratchet import (
     parse_overrides,
 )
 from tc_fitness.runner import (
+    Colours,
     ConditionalCheck,
     ConditionalResult,
     PavedRoadFooter,
@@ -64,8 +65,11 @@ from tc_fitness.runner import (
     Verdicts,
     main_cli,
     make_env_path_conditional_check,
+    print_aggregate,
     resolve_script,
     run,
+    select_all,
+    select_gate,
     staged_paths,
 )
 from tc_fitness.staged import (
@@ -142,6 +146,7 @@ __all__ = [
     "make_module_roots_resolver",
     "make_binding_narrower",
     # runner
+    "Colours",
     "Verdicts",
     "RunnerConfig",
     "PavedRoadFooter",
@@ -150,6 +155,9 @@ __all__ = [
     "make_env_path_conditional_check",
     "resolve_script",
     "staged_paths",
+    "select_all",
+    "select_gate",
+    "print_aggregate",
     "run",
     "main_cli",
 ]

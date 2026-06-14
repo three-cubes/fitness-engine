@@ -27,13 +27,17 @@ import pytest
 
 from tc_fitness.catalogue import RuleEntry
 from tc_fitness.runner import (
+    Colours,
     ConditionalResult,
     RunnerConfig,
     Verdicts,
     main_cli,
     make_env_path_conditional_check,
+    print_aggregate,
     resolve_script,
     run,
+    select_all,
+    select_gate,
 )
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
@@ -789,6 +793,143 @@ def test_static_and_env_gated_args_order(
     )
     monkeypatch.setenv("GATE_ENV", "1")
     assert run(rules, mode="all", repo_root=repo_root, checks_dir=checks_dir).ok
+
+
+# --------------------------------------------------------------------------- #
+# public subprocess-dispatch mode + promoted ledger primitives (Task 1.6)
+#
+# So taz drops its 7 private-symbol imports and reimplemented dispatch.
+# --------------------------------------------------------------------------- #
+
+
+def test_dispatch_subprocess_routes_python_checks_through_subprocess(
+    checks_dir: Path, repo_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A pure-python check that would run IN-PROCESS by default is routed through
+    # the guarded subprocess path when dispatch="subprocess". It writes a marker
+    # to a file from its OWN process so we can prove it ran out-of-process.
+    marker = repo_root / "ran_in_subprocess.txt"
+    (checks_dir / "check_subp.py").write_text(
+        "import os, sys\n"
+        "def main():\n"
+        f"    open(r'{marker}', 'w').write(str(os.getpid()))\n"
+        "    return 0\n"
+        "if __name__ == '__main__':\n"
+        "    sys.exit(main())\n"
+    )
+    rules = (RuleEntry(id="SUBP", gate="subp", check="subp", summary="subp"),)
+    verdict = run(
+        rules, mode="all", repo_root=repo_root, checks_dir=checks_dir, dispatch="subprocess"
+    )
+    out = _plain(capsys.readouterr().out)
+    assert verdict.ok
+    assert verdict.ran == 1
+    assert marker.exists()  # ran as a real child process
+    child_pid = int(marker.read_text())
+    import os as _os
+
+    assert child_pid != _os.getpid()  # genuinely a different process
+    assert "PASS [SUBP] subp" in out
+
+
+def test_dispatch_subprocess_produces_same_aggregate_banner(
+    checks_dir: Path, repo_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Run-as-a-file needs a main guard (subprocess invokes the script directly).
+    (checks_dir / "check_sp_ok.py").write_text(
+        "import sys\ndef main():\n    return 0\nif __name__ == '__main__':\n    sys.exit(main())\n"
+    )
+    (checks_dir / "check_sp_bad.py").write_text(
+        "import sys\ndef main():\n    return 1\nif __name__ == '__main__':\n    sys.exit(main())\n"
+    )
+    rules = (
+        RuleEntry(id="SO", gate="so", check="sp_ok", summary="ok"),
+        RuleEntry(id="SB", gate="sb", check="sp_bad", summary="bad"),
+    )
+    verdict = run(
+        rules, mode="all", repo_root=repo_root, checks_dir=checks_dir, dispatch="subprocess"
+    )
+    out = _plain(capsys.readouterr().out)
+    assert verdict.failures == ["SB"]
+    assert "1/2 rule(s) failed: SB" in out
+
+
+def test_main_cli_dispatch_subprocess_kwarg(checks_dir: Path, repo_root: Path) -> None:
+    _write_py_check(checks_dir, "cli_subp", "import sys; sys.exit(0)")
+    rules = (RuleEntry(id="CS", gate="cs", check="cli_subp", summary="cs"),)
+    rc = main_cli(rules, ["--all"], repo_root=repo_root, checks_dir=checks_dir, dispatch="subprocess")
+    assert rc == 0
+
+
+def test_default_dispatch_is_inprocess(checks_dir: Path, repo_root: Path) -> None:
+    # The v0.3.0 default: pure-python checks run in-process (no dispatch kwarg).
+    marker = repo_root / "should_not_exist.txt"
+    (checks_dir / "check_ip.py").write_text(
+        "import os\n"
+        "def main():\n"
+        "    return 0\n"
+    )
+    rules = (RuleEntry(id="IP", gate="ip", check="ip", summary="ip"),)
+    verdict = run(rules, mode="all", repo_root=repo_root, checks_dir=checks_dir)
+    assert verdict.ok
+    assert not marker.exists()
+
+
+# promoted ledger primitives -------------------------------------------------- #
+
+
+def test_select_all_is_public_and_filters_run_all_and_proposed() -> None:
+    rules = (
+        RuleEntry(id="A", gate="a", check="a"),
+        RuleEntry(id="B", gate="b", check="b", run_all=False),
+        RuleEntry(id="C", gate="c", check="(proposed)", status="proposed"),
+    )
+    assert [e.id for e in select_all(rules)] == ["A"]
+
+
+def test_select_gate_is_public_and_case_insensitive() -> None:
+    rules = (RuleEntry(id="F26", gate="f26", check="x"),)
+    assert [e.id for e in select_gate(rules, "f26")] == ["F26"]
+    assert select_gate(rules, "nope") == []
+
+
+def test_print_aggregate_is_public(capsys: pytest.CaptureFixture[str]) -> None:
+    print_aggregate(Verdicts(ran=2, failures=[]))
+    assert "All 2 architecture fitness functions passed" in _plain(capsys.readouterr().out)
+    print_aggregate(Verdicts(ran=2, failures=["X"]))
+    assert "1/2 rule(s) failed: X" in _plain(capsys.readouterr().out)
+
+
+def test_colours_namespace_is_public() -> None:
+    # The colours taz imports as private _GREEN/_RED/_RESET/_YELLOW are exposed
+    # as a public namespace.
+    assert Colours.GREEN == "\033[0;32m"
+    assert Colours.RED == "\033[0;31m"
+    assert Colours.YELLOW == "\033[0;33m"
+    assert Colours.RESET == "\033[0m"
+
+
+def test_underscore_aliases_still_re_exported() -> None:
+    # Back-compat: taz's private imports keep resolving until it migrates.
+    from tc_fitness.runner import (
+        _GREEN,
+        _print_aggregate,
+        _RED,
+        _RESET,
+        _select_all,
+        _select_gate,
+        _YELLOW,
+    )
+
+    assert _print_aggregate is print_aggregate
+    assert _select_all is select_all
+    assert _select_gate is select_gate
+    assert (_GREEN, _RED, _YELLOW, _RESET) == (
+        Colours.GREEN,
+        Colours.RED,
+        Colours.YELLOW,
+        Colours.RESET,
+    )
 
 
 def test_argv_exception_fields_work_in_parallel_dispatch(
