@@ -43,7 +43,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -420,17 +420,17 @@ def make_binding_narrower(
                     patched_modules.append((candidate, real_python_files))
                     candidate.python_files = _scoped_python_files  # type: ignore[attr-defined]
 
-            extra_original: Callable[..., object] | None = None
+            extra_original: Callable[..., Iterable[Path]] | None = None
             extra_owner: type | None = None
             extra_name = ""
             if extra_method is not None:
                 extra_owner, extra_name = extra_method
                 extra_original = getattr(extra_owner, extra_name)
-                real_extra = extra_original
+                real_extra: Callable[..., Iterable[Path]] = extra_original
 
                 def _scoped_extra(self: object, *a: object, **k: object) -> list[Path]:
-                    full = real_extra(self, *a, **k)  # type: ignore[misc]
-                    return filter_to_staged(list(full), staged_abs)
+                    full = list(real_extra(self, *a, **k))
+                    return filter_to_staged(full, staged_abs)
 
                 setattr(extra_owner, extra_name, _scoped_extra)
 
