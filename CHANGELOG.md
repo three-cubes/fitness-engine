@@ -15,6 +15,32 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+## [v0.4.1] — byte-stable `--staged` output (EPIC #499 common-process)
+
+Makes `--staged` / staged-dispatch output **byte-stable**, matching the quality
+of the `--all` path. Purely additive over v0.4.0: no public signature changes,
+and the staged SELECTION + PASS/FAIL set are **unchanged** — only the output
+FORMAT/stability changes. Consumers (kairix, tc-agent-zone) repin and their
+`--staged` output simply stabilises; no verdict moves.
+
+### Fixed
+
+- **Staged subprocess dispatch now CAPTURES + replays child output in catalogue
+  order, like `--all`.** Previously `_dispatch_staged` routed `.sh` / conditional
+  subprocess checks through the non-capturing sequential `_run_one_subprocess`,
+  which ran the child with stdout inherited on fd1. Under output redirection (a
+  pre-commit / CI pipe, or any `--staged > file.log`) the child's direct-fd
+  stdout raced the parent's buffered `print()` ledger — interleaving lines, or
+  vanishing from a captured buffer entirely — so the report was not byte-stable.
+  Staged subprocess checks now run via the SAME capturing path the `--all`
+  parallel dispatch uses: the child's stdout/stderr are captured into pipes the
+  parent owns and replayed in catalogue order BETWEEN the rule's `run [id]` and
+  `PASS`/`FAIL [id]` lines. No fd race, no interleave, consistent per-rule
+  framing. The capturing primitive (`_capture_one_subprocess`) and the named
+  ledger replay (`_replay_subprocess_verdict`) are now shared by the `--all`
+  parallel path and the staged path, so both emit the identical subprocess
+  framing.
+
 ### v0.4.0 — declarative seam absorption (EPIC #499 common-process)
 
 Absorbs the consumer-side injection seams kairix and tc-agent-zone hand-code

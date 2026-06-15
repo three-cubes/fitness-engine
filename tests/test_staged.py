@@ -576,3 +576,170 @@ def test_staged_empty_runs_everything_through_runner(tmp_path: Path) -> None:
         rules, mode="staged", staged_files=[], repo_root=tmp_path, checks_dir=checks_dir
     )
     assert verdict.failures == ["ANY"]
+
+
+# --------------------------------------------------------------------------- #
+# staged-mode subprocess output is BYTE-STABLE — capturing format (v0.4.1)
+#
+# A shell detector's stdout is written to its own process's fd1. The OLD staged
+# path routed subprocess checks through the NON-capturing _run_one_subprocess,
+# which let the child's direct-fd stdout escape the parent's buffered print()
+# (under redirection the child output races / merges with the parent ledger, or
+# vanishes from a captured buffer entirely). The --all capturing path buffers
+# the child output and replays it IN catalogue order between the run/PASS lines.
+# Staged mode must use that SAME capturing format so its output is byte-stable.
+# --------------------------------------------------------------------------- #
+
+
+def _write_noisy_sh(checks_dir: Path, filename: str, exit_code: int, *lines: str) -> None:
+    """A shell detector that echoes ``lines`` to its OWN stdout then exits."""
+    script = "#!/usr/bin/env bash\n"
+    for line in lines:
+        script += f'echo "{line}"\n'
+    script += f"exit {exit_code}\n"
+    (checks_dir / filename).write_text(script)
+    (checks_dir / filename).chmod(0o755)
+
+
+def _staged_run_capturing(
+    rules: tuple[RuleEntry, ...], *, repo_root: Path, checks_dir: Path, staged_files: list[str]
+) -> str:
+    """Run staged mode under redirect_stdout and return the colour-free buffer.
+
+    Redirecting Python's ``sys.stdout`` (the way pre-commit / a CI pipe captures
+    a run) is exactly where the non-capturing subprocess path leaks: a child
+    writing to the inherited fd1 bypasses the StringIO buffer. So a child's
+    detector output is only present in the buffer when the runner CAPTURES it.
+    """
+    import io
+    import re
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        run(
+            rules,
+            mode="staged",
+            staged_files=staged_files,
+            repo_root=repo_root,
+            checks_dir=checks_dir,
+        )
+    return re.sub(r"\x1b\[[0-9;]*m", "", buf.getvalue())
+
+
+def test_staged_subprocess_output_is_captured_and_replayed_in_order(tmp_path: Path) -> None:
+    # The detector's OWN stdout must land in the buffered ledger BETWEEN its
+    # run [id] and PASS [id] lines — proving staged mode captures-and-replays
+    # like --all, instead of letting the child fd escape (race / vanish).
+    checks_dir = tmp_path / "scripts" / "checks"
+    checks_dir.mkdir(parents=True)
+    _write_noisy_sh(
+        checks_dir, "check-noisy.sh", 0, "CHILD-DETECTOR-LINE-1", "CHILD-DETECTOR-LINE-2"
+    )
+    rules = (
+        RuleEntry(
+            id="SH", gate="sh", check="noisy", summary="noisy shell",
+            script="check-noisy.sh", staged_class="always-run",
+        ),
+    )
+
+    out = _staged_run_capturing(
+        rules, repo_root=tmp_path, checks_dir=checks_dir, staged_files=["kairix/a.py"]
+    )
+
+    # The child's fd output IS in the captured buffer (it did not escape to the
+    # real fd1) — the capturing format, not the leaky non-capturing one.
+    assert "CHILD-DETECTOR-LINE-1" in out
+    assert "CHILD-DETECTOR-LINE-2" in out
+    # …and replayed IN ORDER between the run and PASS lines (banner placement
+    # matches --all: child output sits inside the rule's run/verdict framing).
+    i_run = out.index("run [SH]")
+    i_l1 = out.index("CHILD-DETECTOR-LINE-1")
+    i_l2 = out.index("CHILD-DETECTOR-LINE-2")
+    i_pass = out.index("PASS [SH]")
+    assert i_run < i_l1 < i_l2 < i_pass
+
+
+def test_staged_subprocess_output_is_byte_stable_across_runs(tmp_path: Path) -> None:
+    # The whole point: two identical staged runs over a mixed catalogue (a
+    # subprocess shell detector + an in-process python check, plus a skipped
+    # out-of-scope rule) produce BYTE-IDENTICAL captured output. The
+    # non-capturing path can't promise this — the child's fd output races /
+    # vanishes — so this is the regression that pins the capturing format.
+    checks_dir = tmp_path / "scripts" / "checks"
+    checks_dir.mkdir(parents=True)
+    _write_noisy_sh(checks_dir, "check-detector.sh", 0, "DETECTOR-OUTPUT-A", "DETECTOR-OUTPUT-B")
+    _write_py_check(checks_dir, "py_inproc", 'print("INPROCESS-OUTPUT"); return 0')
+    _write_py_check(checks_dir, "py_skipped", "return 1")  # would FAIL if dispatched
+    rules = (
+        RuleEntry(
+            id="DET", gate="det", check="detector", summary="shell detector",
+            script="check-detector.sh", staged_class="always-run",
+        ),
+        RuleEntry(
+            id="IP", gate="ip", check="py_inproc", summary="in-process rule",
+            staged_class="file-local", staged_scope=("kairix",),
+        ),
+        RuleEntry(
+            id="SK", gate="sk", check="py_skipped", summary="out-of-scope rule",
+            staged_class="file-local", staged_scope=("nowhere",),
+        ),
+    )
+
+    runs = [
+        _staged_run_capturing(
+            rules, repo_root=tmp_path, checks_dir=checks_dir, staged_files=["kairix/a.py"]
+        )
+        for _ in range(4)
+    ]
+
+    # Every run's captured output is byte-identical to the first.
+    assert all(r == runs[0] for r in runs), "staged-mode output is NOT byte-stable across runs"
+    first = runs[0]
+    # The detector's child output is captured (not leaked) and replayed in order
+    # within its run/PASS framing.
+    assert first.index("run [DET]") < first.index("DETECTOR-OUTPUT-A") < first.index(
+        "DETECTOR-OUTPUT-B"
+    ) < first.index("PASS [DET]")
+    # The in-process check's stdout is captured and replayed inline as before.
+    assert first.index("run [IP]") < first.index("INPROCESS-OUTPUT") < first.index("PASS [IP]")
+    # The out-of-scope rule is transparently skipped (verdict set unchanged: the
+    # would-fail rule never registers).
+    assert "skip [SK]" in first
+    # The catalogue-order ledger holds: DET before IP before the skipped SK.
+    assert first.index("run [DET]") < first.index("run [IP]") < first.index("skip [SK]")
+
+
+def test_staged_subprocess_verdicts_unchanged_by_capturing(tmp_path: Path) -> None:
+    # The capturing route changes ONLY the output format — the staged SELECTION
+    # and PASS/FAIL set are identical: a failing shell detector in scope still
+    # FAILs, a passing one PASSes, an out-of-scope rule is still skipped.
+    checks_dir = tmp_path / "scripts" / "checks"
+    checks_dir.mkdir(parents=True)
+    _write_noisy_sh(checks_dir, "check-passing.sh", 0, "ok")
+    _write_noisy_sh(checks_dir, "check-failing.sh", 3, "boom")
+    rules = (
+        RuleEntry(
+            id="OK", gate="ok", check="passing", summary="passing detector",
+            script="check-passing.sh", staged_class="always-run",
+        ),
+        RuleEntry(
+            id="BAD", gate="bad", check="failing", summary="failing detector",
+            script="check-failing.sh", staged_class="always-run",
+        ),
+        RuleEntry(
+            id="OOS", gate="oos", check="passing", summary="out-of-scope",
+            script="check-passing.sh", staged_class="file-local", staged_scope=("nowhere",),
+        ),
+    )
+    verdict = run(
+        rules,
+        mode="staged",
+        staged_files=["kairix/touched.py"],
+        repo_root=tmp_path,
+        checks_dir=checks_dir,
+    )
+    # The failing detector FAILs; the passing one runs; OOS dedupes onto the same
+    # script as OK (so it is not a separate run). Verdict set is format-agnostic.
+    assert verdict.failures == ["BAD"]
+    assert "OK" not in verdict.failures

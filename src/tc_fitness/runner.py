@@ -536,6 +536,82 @@ def _run_one_subprocess(entry: RuleEntry, cfg: RunnerConfig) -> int | None:
     return 1
 
 
+def _capture_one_subprocess(
+    entry: RuleEntry, cfg: RunnerConfig
+) -> tuple[int | None, str, str, tuple[str, ...]]:
+    """Run ``entry``'s subprocess with output CAPTURED — no direct-fd race.
+
+    The capturing primitive shared by the ``--all`` parallel path and the
+    ``--staged`` path: build the argv, run the child with ``capture_output=True``
+    (so its stdout/stderr land in pipes the parent owns, never on the inherited
+    fd1 where they would race the parent's buffered ``print()`` under
+    redirection), and return ``(verdict, stdout, stderr, skip_lines)``. The
+    CALLER replays the named ledger via :func:`_replay_subprocess_verdict`, so
+    the report stays byte-stable. ``verdict`` is 0 pass / 1 fail / ``None`` skip
+    (conditional input absent → ``skip_lines`` carry the verbatim skip text).
+    """
+    built = _subprocess_argv(entry, cfg)
+    if built.argv is None:
+        return None, "", "", built.skip_lines
+    argv = built.argv
+    script_path = built.script_path
+    assert script_path is not None
+    if not script_path.exists():
+        return 1, "", f"check script not found: {script_path.name}", ()
+    try:
+        result = subprocess.run(argv, cwd=cfg.repo_root, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        return 1, "", f"could not launch {script_path.name}: {exc}", ()
+    return result.returncode, (result.stdout or ""), (result.stderr or ""), ()
+
+
+def _replay_subprocess_verdict(
+    entry: RuleEntry,
+    cfg: RunnerConfig,
+    rc: int | None,
+    out: str,
+    err: str,
+    skip_lines: tuple[str, ...],
+) -> int | None:
+    """Replay one captured subprocess result as the named ledger, in order.
+
+    The single replay surface both the parallel ``--all`` path and the staged
+    path use, so a captured subprocess emits the IDENTICAL ``run [id]`` →
+    captured output → ``PASS``/``FAIL [id]`` framing regardless of which mode
+    dispatched it. A ``None`` ``rc`` is an intentional skip (print the verbatim
+    ``skip_lines``); otherwise the child's captured stdout/stderr are written
+    between the run and verdict lines (newline-normalised), then the verdict.
+    """
+    if rc is None:
+        for line in skip_lines:
+            print(line)
+        return None
+    print(f"{_YELLOW}run [{entry.id}]{_RESET} {resolve_script(entry)}")
+    if out:
+        sys.stdout.write(out if out.endswith("\n") else out + "\n")
+    if err:
+        sys.stderr.write(err if err.endswith("\n") else err + "\n")
+    if rc == 0:
+        print(f"{_GREEN}PASS [{entry.id}]{_RESET} {entry.summary[:88]}")
+        return 0
+    print(f"{_RED}FAIL [{entry.id}]{_RESET} {entry.summary[:88]} (exit {rc})")
+    _print_paved_road(entry, cfg)
+    return 1
+
+
+def _run_one_subprocess_capturing(entry: RuleEntry, cfg: RunnerConfig) -> int | None:
+    """Dispatch one subprocess check via the CAPTURING path (buffer + replay).
+
+    The staged-mode analogue of :func:`_run_one_subprocess`, with the
+    byte-stable behaviour the ``--all`` parallel path already has: the child's
+    output is captured (never leaks to the inherited fd1) and replayed in order
+    inside the rule's ``run``/verdict framing. Returns 0 pass / 1 fail / ``None``
+    skip, exactly as the non-capturing variant did — only the FORMAT stabilises.
+    """
+    rc, out, err, skip_lines = _capture_one_subprocess(entry, cfg)
+    return _replay_subprocess_verdict(entry, cfg, rc, out, err, skip_lines)
+
+
 # ── selection ────────────────────────────────────────────────────────────
 
 
@@ -595,19 +671,8 @@ def _run_subprocess_parallel(
     captured: dict[str, tuple[int | None, str, str, tuple[str, ...]]] = {}
 
     def _work(entry: RuleEntry) -> tuple[str, int | None, str, str, tuple[str, ...]]:
-        built = _subprocess_argv(entry, cfg)
-        if built.argv is None:
-            return entry.id, None, "", "", built.skip_lines
-        argv = built.argv
-        script_path = built.script_path
-        assert script_path is not None
-        if not script_path.exists():
-            return entry.id, 1, "", f"check script not found: {script_path.name}", ()
-        try:
-            result = subprocess.run(argv, cwd=cfg.repo_root, capture_output=True, text=True, check=False)
-        except OSError as exc:
-            return entry.id, 1, "", f"could not launch {script_path.name}: {exc}", ()
-        return entry.id, result.returncode, (result.stdout or ""), (result.stderr or ""), ()
+        rc, out, err, skip_lines = _capture_one_subprocess(entry, cfg)
+        return entry.id, rc, out, err, skip_lines
 
     workers = min(cfg.max_workers, max(1, len(entries)))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
@@ -619,22 +684,7 @@ def _run_subprocess_parallel(
     verdicts: dict[str, int | None] = {}
     for entry in entries:
         rc, out, err, skip_lines = captured[entry.id]
-        if rc is None:
-            for line in skip_lines:
-                print(line)
-            verdicts[entry.id] = None
-            continue
-        print(f"{_YELLOW}run [{entry.id}]{_RESET} {resolve_script(entry)}")
-        if out:
-            sys.stdout.write(out if out.endswith("\n") else out + "\n")
-        if err:
-            sys.stderr.write(err if err.endswith("\n") else err + "\n")
-        if rc == 0:
-            print(f"{_GREEN}PASS [{entry.id}]{_RESET} {entry.summary[:88]}")
-        else:
-            print(f"{_RED}FAIL [{entry.id}]{_RESET} {entry.summary[:88]} (exit {rc})")
-            _print_paved_road(entry, cfg)
-        verdicts[entry.id] = rc
+        verdicts[entry.id] = _replay_subprocess_verdict(entry, cfg, rc, out, err, skip_lines)
     return verdicts
 
 
@@ -694,9 +744,14 @@ def _run_staged_one(
     :func:`restrict_python_files` (and the consumer's extra
     ``enumeration_narrower``, if any) so the in-process check walks ONLY those
     files. Everything else runs over its full natural scope.
+
+    Subprocess checks route through the CAPTURING dispatch
+    (:func:`_run_one_subprocess_capturing`) — the same buffer-and-replay path
+    ``--all`` uses — so a child detector's stdout never races the parent's
+    buffered ledger on the inherited fd1, and staged output stays byte-stable.
     """
     if not _runs_in_process(entry, cfg):
-        return _run_one_subprocess(entry, cfg)
+        return _run_one_subprocess_capturing(entry, cfg)
     if decision.scope_files:
         scope_files = list(decision.scope_files)
         with contextlib.ExitStack() as stack:

@@ -26,7 +26,8 @@ def test_version_matches_installed_metadata() -> None:
     assert tc_fitness.__version__ == metadata_version
 
 
-def test_version_is_unreleased_v0_4_0_during_wave_1() -> None:
-    # Wave 1 develops 0.4.0 (tagged only at G1). The literal stays at 0.4.0
-    # throughout the wave so the CHANGELOG ## [Unreleased] section is honest.
-    assert tc_fitness.__version__ == "0.4.0"
+def test_version_is_unreleased_v0_4_1() -> None:
+    # v0.4.1 develops the staged-output stability fix (tagged only at review +
+    # merge). The literal stays at 0.4.1 throughout so the CHANGELOG entry is
+    # honest and the fallback literal tracks the pyproject version.
+    assert tc_fitness.__version__ == "0.4.1"
