@@ -68,9 +68,10 @@ import os
 import subprocess
 import sys
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from tc_fitness.catalogue import RuleEntry, is_dispatchable
 from tc_fitness.context import CheckContext
@@ -298,6 +299,15 @@ class RunnerConfig:
     * ``parallel_subprocess`` — run ``.sh`` subprocess checks on a thread pool
       (default ``False`` → sequential, byte-identical interleaving).
     * ``max_workers`` — thread-pool cap when parallel.
+    * ``core_check_configs`` — the ``[tool.tc_fitness.core_checks.<module>]``
+      config blocks, keyed by CORE-check module name. A ``core:<module>`` entry
+      is dispatched in-process with its matching block injected via the module's
+      ``build(config, repo_root=...)``; a module with no block runs on the
+      rule's class-attribute defaults. Default empty (no CORE check is bound).
+    * ``establish_baseline`` — when ``True``, a ``core:<module>`` entry runs in
+      adoption mode (write today's offenders as the frozen baseline) instead of
+      gating. Threads the rule's ``--establish-baseline`` flag through the
+      catalogue-driven dispatch path. Default ``False``.
     """
 
     repo_root: Path = field(default_factory=Path.cwd)
@@ -308,6 +318,8 @@ class RunnerConfig:
     conditional_check: ConditionalCheck | None = None
     parallel_subprocess: bool = False
     max_workers: int = _DEFAULT_MAX_WORKERS
+    core_check_configs: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    establish_baseline: bool = False
     #: Dispatch strategy for pure-python checks. ``"inprocess"`` (default,
     #: v0.3.0 behaviour) imports the module and calls ``main()`` in-process,
     #: sharing one ``CheckContext`` AST cache. ``"subprocess"`` routes EVERY
@@ -357,9 +369,17 @@ def _dispatches_in_process(entry: RuleEntry) -> bool:
 def _runs_in_process(entry: RuleEntry, cfg: RunnerConfig) -> bool:
     """Whether ``entry`` runs in-process, honouring ``cfg.dispatch``.
 
-    ``dispatch="subprocess"`` forces EVERY check — python included — onto the
-    guarded subprocess path (taz's pure-consumer mode). Otherwise the v0.3.0
-    per-entry rule (:func:`_dispatches_in_process`) applies."""
+    A ``core:`` entry ALWAYS runs in-process: it resolves to an importable
+    ``tc_fitness.core_checks.<module>`` with config injected, NOT to a script on
+    the consumer's checks-dir, so the guarded subprocess path (which would look
+    for a non-existent ``tc_fitness/core_checks/<module>.py`` under the repo's
+    checks dir) must never claim it — even under ``dispatch="subprocess"``.
+
+    ``dispatch="subprocess"`` otherwise forces EVERY check — python included —
+    onto the guarded subprocess path (taz's pure-consumer mode). Otherwise the
+    v0.3.0 per-entry rule (:func:`_dispatches_in_process`) applies."""
+    if is_core_check(entry):
+        return True
     if cfg.dispatch == "subprocess":
         return False
     return _dispatches_in_process(entry)
@@ -416,6 +436,42 @@ def _load_check_main(module_name: str) -> Callable[[], int]:
     return _invoke
 
 
+def _core_check_config(entry: RuleEntry, cfg: RunnerConfig) -> Mapping[str, Any]:
+    """The consumer's config block for a ``core:<module>`` entry (or ``{}``).
+
+    Keyed by the bare module name (the part after ``core:``), so the catalogue
+    entry ``check="core:no_duplicate_string"`` resolves to the
+    ``[tool.tc_fitness.core_checks.no_duplicate_string]`` block. A check with no
+    block runs on the rule's class-attribute defaults."""
+    module = entry.check[len(_CORE_PREFIX) :]
+    return cfg.core_check_configs.get(module, {})
+
+
+def _load_core_check(entry: RuleEntry, cfg: RunnerConfig) -> Callable[[], int]:
+    """Build the configured CORE rule for ``entry`` and return a zero-arg runner.
+
+    Resolves the importable module (``tc_fitness.core_checks.<module>``), looks up
+    the consumer's ``[tool.tc_fitness.core_checks.<module>]`` config block, and
+    calls the module's ``build(config, repo_root=...)`` to get the rule with the
+    consumer's roots / extensions / thresholds applied. The returned callable runs
+    ``rule.establish_baseline()`` (adoption mode) when ``cfg.establish_baseline``
+    is set, else ``rule.run()`` (gate vs the baseline) — the SAME surfaces
+    :func:`tc_fitness.core_checks.run_core_check` drives, but with the config the
+    in-process ``main([])`` path could never inject."""
+    module = importlib.import_module(core_module_name(entry))
+    config = _core_check_config(entry, cfg)
+    rule = module.build(config, repo_root=cfg.repo_root)
+
+    def _invoke() -> int:
+        if cfg.establish_baseline:
+            path = rule.establish_baseline()
+            print(f"established baseline: {path}")
+            return 0
+        return int(rule.run())
+
+    return _invoke
+
+
 def _print_paved_road(entry: RuleEntry, cfg: RunnerConfig) -> None:
     """Print the consumer's paved-road affordance under a FAIL, if any."""
     if cfg.paved_road_footer is None:
@@ -443,7 +499,14 @@ def _run_one_inprocess(entry: RuleEntry, cfg: RunnerConfig) -> int:
     crashed = False
     rc = 1
     try:
-        check_main = _load_check_main(_module_name_for(entry))
+        if is_core_check(entry):
+            # A ``core:`` entry ALWAYS dispatches in-process with the consumer's
+            # ``[tool.tc_fitness.core_checks.<module>]`` config injected via the
+            # module's ``build()`` — never through ``main([])`` (no config) nor
+            # the non-existent subprocess script path.
+            check_main = _load_core_check(entry, cfg)
+        else:
+            check_main = _load_check_main(_module_name_for(entry))
         with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
             result = check_main()
         rc = result if isinstance(result, int) else 1
@@ -906,15 +969,20 @@ def run(
     parallel_subprocess: bool = False,
     max_workers: int = _DEFAULT_MAX_WORKERS,
     dispatch: str = "inprocess",
+    core_check_configs: Mapping[str, Mapping[str, Any]] | None = None,
+    establish_baseline: bool = False,
 ) -> Verdicts:
     """Run ``rules`` in ``mode`` and return the :class:`Verdicts`.
 
     ``mode`` is ``"all"`` (default), ``"staged"`` (pass ``staged_files`` to
     override the ``git`` call), or ``"gate"`` (with ``gate_id``). ``dispatch`` is
     ``"inprocess"`` (default, v0.3.0) or ``"subprocess"`` (route every check
-    through the guarded subprocess path). The injection kwargs map onto
-    :class:`RunnerConfig`. Always prints the named verdict ledger; the return
-    value carries the structured outcome for embedders."""
+    through the guarded subprocess path). ``core_check_configs`` injects each
+    ``core:<module>`` entry's ``[tool.tc_fitness.core_checks.<module>]`` block;
+    ``establish_baseline`` runs every dispatched ``core:`` entry in baseline
+    adoption mode. The injection kwargs map onto :class:`RunnerConfig`. Always
+    prints the named verdict ledger; the return value carries the structured
+    outcome for embedders."""
     cfg = RunnerConfig(
         repo_root=repo_root if repo_root is not None else Path.cwd(),
         checks_dir=checks_dir,
@@ -925,6 +993,8 @@ def run(
         parallel_subprocess=parallel_subprocess,
         max_workers=max_workers,
         dispatch=dispatch,
+        core_check_configs=core_check_configs if core_check_configs is not None else {},
+        establish_baseline=establish_baseline,
     )
 
     if mode == "gate":
@@ -962,6 +1032,7 @@ def main_cli(
     parallel_subprocess: bool = False,
     max_workers: int = _DEFAULT_MAX_WORKERS,
     dispatch: str = "inprocess",
+    core_check_configs: Mapping[str, Mapping[str, Any]] | None = None,
     extra_flags: Sequence[tuple[str, dict[str, object]]] = (),
     post_parse: Callable[[argparse.Namespace], dict[str, object]] | None = None,
 ) -> int:
@@ -993,6 +1064,11 @@ def main_cli(
     group.add_argument("--all", action="store_true", help="run every in-scope rule (default)")
     group.add_argument("--staged", action="store_true", help="run only rules a staged change could trip")
     group.add_argument("--gate", metavar="ID", help="run one rule by catalogue id (e.g. F26)")
+    parser.add_argument(
+        "--establish-baseline",
+        action="store_true",
+        help="run dispatched core: entries in baseline-adoption mode (freeze today's offenders)",
+    )
     for flag, kwargs in extra_flags:
         parser.add_argument(flag, **kwargs)  # type: ignore[arg-type]
     args = parser.parse_args(argv)
@@ -1007,6 +1083,8 @@ def main_cli(
         "parallel_subprocess": parallel_subprocess,
         "max_workers": max_workers,
         "dispatch": dispatch,
+        "core_check_configs": core_check_configs,
+        "establish_baseline": bool(args.establish_baseline),
     }
     if post_parse is not None:
         common.update(post_parse(args))

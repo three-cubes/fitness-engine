@@ -1023,3 +1023,90 @@ def test_argv_exception_fields_work_in_parallel_dispatch(
     assert run(
         rules, mode="all", repo_root=repo_root, checks_dir=checks_dir, parallel_subprocess=True
     ).ok
+
+
+# --------------------------------------------------------------------------- #
+# core: entries — config injection + in-process dispatch (v0.6.1)
+# --------------------------------------------------------------------------- #
+
+_CORE_DUP_FIXTURE = '''"""docstring."""
+
+
+def a() -> None:
+    raise ValueError("a repeated long literal")
+
+
+def b() -> None:
+    raise ValueError("a repeated long literal")
+
+
+def c() -> None:
+    raise ValueError("a repeated long literal")
+'''
+
+
+def _core_rule() -> tuple[RuleEntry, ...]:
+    return (
+        RuleEntry(
+            id="no-duplicate-string",
+            gate="no-duplicate-string",
+            check="core:no_duplicate_string",
+            summary="no duplicated literal",
+        ),
+    )
+
+
+def test_core_entry_injects_config_and_flags(repo_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "dup.py").write_text(_CORE_DUP_FIXTURE, encoding="utf-8")
+    verdict = run(
+        _core_rule(),
+        mode="all",
+        repo_root=repo_root,
+        core_check_configs={"no_duplicate_string": {"roots": ["src"], "min_occurrences": 3}},
+    )
+    out = _plain(capsys.readouterr().out)
+    assert not verdict.ok
+    assert "FAIL [no-duplicate-string]" in out
+    assert "dup.py" in out
+
+
+def test_core_entry_without_config_is_vacuous(repo_root: Path) -> None:
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "dup.py").write_text(_CORE_DUP_FIXTURE, encoding="utf-8")
+    # No config block → roots=() → nothing enumerated → vacuous pass.
+    assert run(_core_rule(), mode="all", repo_root=repo_root).ok
+
+
+def test_core_entry_in_process_even_under_subprocess_dispatch(
+    repo_root: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "dup.py").write_text(_CORE_DUP_FIXTURE, encoding="utf-8")
+    verdict = run(
+        _core_rule(),
+        mode="all",
+        repo_root=repo_root,
+        dispatch="subprocess",
+        core_check_configs={"no_duplicate_string": {"roots": ["src"]}},
+    )
+    out = _plain(capsys.readouterr().out)
+    assert not verdict.ok
+    assert "FAIL [no-duplicate-string]" in out
+    assert "check script not found" not in out
+
+
+def test_core_entry_establish_baseline_then_passes(repo_root: Path) -> None:
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "dup.py").write_text(_CORE_DUP_FIXTURE, encoding="utf-8")
+    cfg_kwargs = {
+        "repo_root": repo_root,
+        "core_check_configs": {"no_duplicate_string": {"roots": ["src"]}},
+    }
+    # Establish writes the baseline and passes…
+    assert run(_core_rule(), mode="all", establish_baseline=True, **cfg_kwargs).ok  # type: ignore[arg-type]
+    baseline = repo_root / ".architecture" / "baseline" / "no-duplicate-string-files.txt"
+    assert baseline.exists()
+    assert "src/dup.py" in baseline.read_text(encoding="utf-8")
+    # …and the subsequent gate run passes (offender grandfathered).
+    assert run(_core_rule(), mode="all", **cfg_kwargs).ok  # type: ignore[arg-type]

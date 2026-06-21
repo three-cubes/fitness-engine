@@ -53,6 +53,7 @@ from tc_fitness.gate_config import (
     GateConfigError,
     StepSpec,
     load_config,
+    load_core_check_configs,
 )
 from tc_fitness.runner import Colours, main_cli
 
@@ -171,13 +172,24 @@ def _resolve_catalogue(ref: str) -> tuple[object, ...]:
     return tuple(rules)
 
 
-def _run_catalogue_step(step: StepSpec, repo_root: Path, gate_id: str | None) -> StepResult:
+def _run_catalogue_step(
+    step: StepSpec,
+    repo_root: Path,
+    gate_id: str | None,
+    *,
+    establish_baseline: bool = False,
+) -> StepResult:
     """Dispatch the consumer's RuleEntry catalogue via the shared runner.
 
     Runs IN-PROCESS through :func:`tc_fitness.runner.main_cli` so the runner's own
     ``run [id]`` / ``PASS`` / ``FAIL`` ledger prints inline. The step PASSes iff
     ``main_cli`` returns 0. A ``--gate <id>`` from the CLI is threaded through so
     ``tc-fitness run --gate F26`` runs exactly one catalogue rule.
+
+    Any ``core:<module>`` entry in the catalogue receives its
+    ``[tool.tc_fitness.core_checks.<module>]`` config block (read from the SAME
+    repo config the gate loaded) so the CORE check scans the consumer's
+    configured tree. ``establish_baseline`` runs those entries in adoption mode.
     """
     # `kind == "catalogue"` guarantees `catalogue` is set (loader invariant).
     catalogue_ref = step.catalogue or ""
@@ -205,6 +217,9 @@ def _run_catalogue_step(step: StepSpec, repo_root: Path, gate_id: str | None) ->
             sys.path.remove(repo_root_str)
 
     argv = ["--gate", gate_id] if gate_id else ["--all"]
+    if establish_baseline:
+        argv.append("--establish-baseline")
+    core_check_configs = load_core_check_configs(repo_root)
     rc = main_cli(
         rules,  # type: ignore[arg-type]
         argv,
@@ -212,6 +227,7 @@ def _run_catalogue_step(step: StepSpec, repo_root: Path, gate_id: str | None) ->
         checks_dir=checks_dir,
         dispatch=step.dispatch,
         parallel_subprocess=step.parallel,
+        core_check_configs=core_check_configs,
     )
     if rc == 0:
         print(f"{_GREEN}PASS [{step.id}]{_RESET} {label}")
@@ -221,9 +237,15 @@ def _run_catalogue_step(step: StepSpec, repo_root: Path, gate_id: str | None) ->
     return StepResult(step.id, "fail", gating=not step.continue_on_error)
 
 
-def _run_step(step: StepSpec, repo_root: Path, gate_id: str | None) -> StepResult:
+def _run_step(
+    step: StepSpec,
+    repo_root: Path,
+    gate_id: str | None,
+    *,
+    establish_baseline: bool = False,
+) -> StepResult:
     if step.kind == "catalogue":
-        return _run_catalogue_step(step, repo_root, gate_id)
+        return _run_catalogue_step(step, repo_root, gate_id, establish_baseline=establish_baseline)
     return _run_command_step(step, repo_root)
 
 
@@ -247,11 +269,14 @@ def run_gate(
     *,
     only: list[str] | None = None,
     gate_id: str | None = None,
+    establish_baseline: bool = False,
 ) -> GateOutcome:
     """Run the configured steps in order; return the aggregate outcome.
 
     ``only`` restricts to the named step ids (in config order); ``gate_id`` is
     threaded into a catalogue step so a single fitness rule can be targeted.
+    ``establish_baseline`` runs the catalogue step's ``core:`` entries in
+    baseline-adoption mode (freeze today's offenders) instead of gating.
     ``fail_fast`` (from the config) stops at the first gating failure.
     """
     print(f"=== {cfg.name} ===")
@@ -271,7 +296,7 @@ def run_gate(
 
     outcome = GateOutcome()
     for step in selected:
-        result = _run_step(step, repo_root, gate_id)
+        result = _run_step(step, repo_root, gate_id, establish_baseline=establish_baseline)
         outcome.results.append(result)
         if cfg.fail_fast and result.is_gating_failure:
             print(f"{_YELLOW}fail_fast: stopping at first gating failure ({step.id}){_RESET}")
@@ -312,6 +337,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="ID",
         help="target one fitness rule by id inside the catalogue step",
     )
+    run_p.add_argument(
+        "--establish-baseline",
+        action="store_true",
+        help="run the catalogue step's core: entries in baseline-adoption mode "
+        "(freeze today's offenders), then exit",
+    )
     args = parser.parse_args(argv)
 
     repo_root = Path(args.repo_root).resolve()
@@ -321,7 +352,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{_RED}FAIL tc-fitness run{_RESET} — {exc}", file=sys.stderr)
         return 2
 
-    outcome = run_gate(cfg, repo_root, only=args.only, gate_id=args.gate)
+    outcome = run_gate(
+        cfg,
+        repo_root,
+        only=args.only,
+        gate_id=args.gate,
+        establish_baseline=bool(args.establish_baseline),
+    )
     return outcome.exit_code
 
 

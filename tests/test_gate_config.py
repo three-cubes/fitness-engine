@@ -21,7 +21,9 @@ from tc_fitness.gate_config import (
     GateConfigError,
     find_config_file,
     load_config,
+    load_core_check_configs,
     parse_config,
+    parse_core_check_configs,
 )
 
 # --------------------------------------------------------------------------- #
@@ -227,3 +229,69 @@ def test_malformed_toml_is_actionable(tmp_path: Path) -> None:
     with pytest.raises(GateConfigError) as exc:
         load_config(tmp_path)
     assert "fix:" in str(exc.value)
+
+
+# --------------------------------------------------------------------------- #
+# [tool.tc_fitness.core_checks.<module>] config blocks (v0.6.1)
+# --------------------------------------------------------------------------- #
+
+
+def test_core_check_configs_absent_is_empty(tmp_path: Path) -> None:
+    assert parse_core_check_configs({"steps": []}, source=tmp_path / "pyproject.toml") == {}
+
+
+def test_core_check_configs_parsed_keyed_by_module(tmp_path: Path) -> None:
+    table = {
+        "core_checks": {
+            "no_duplicate_string": {"roots": ["src"], "min_occurrences": 3},
+            "cognitive_complexity": {"roots": ["src", "tools"]},
+        }
+    }
+    parsed = parse_core_check_configs(table, source=tmp_path / "pyproject.toml")
+    assert parsed["no_duplicate_string"] == {"roots": ["src"], "min_occurrences": 3}
+    assert parsed["cognitive_complexity"] == {"roots": ["src", "tools"]}
+
+
+def test_core_check_configs_non_table_root_is_actionable(tmp_path: Path) -> None:
+    with pytest.raises(GateConfigError) as exc:
+        parse_core_check_configs({"core_checks": "nope"}, source=tmp_path / "pyproject.toml")
+    assert "fix:" in str(exc.value)
+
+
+def test_core_check_configs_non_table_block_is_actionable(tmp_path: Path) -> None:
+    with pytest.raises(GateConfigError) as exc:
+        parse_core_check_configs(
+            {"core_checks": {"no_duplicate_string": "nope"}},
+            source=tmp_path / "pyproject.toml",
+        )
+    assert "no_duplicate_string" in str(exc.value)
+    assert "fix:" in str(exc.value)
+
+
+def test_load_core_check_configs_from_pyproject(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.tc_fitness]\n"
+        "[[tool.tc_fitness.steps]]\n"
+        "id = 'fitness'\n"
+        "catalogue = 'scripts.checks.cat:ALL'\n"
+        "[tool.tc_fitness.core_checks.no_duplicate_string]\n"
+        "roots = ['src']\n"
+        "min_occurrences = 3\n"
+    )
+    configs = load_core_check_configs(tmp_path)
+    assert configs["no_duplicate_string"]["roots"] == ["src"]
+    assert configs["no_duplicate_string"]["min_occurrences"] == 3
+
+
+def test_load_core_check_configs_from_dedicated_file(tmp_path: Path) -> None:
+    # In a dedicated .tc-fitness.toml the whole document IS the config, so the
+    # block is a top-level [core_checks.<module>] table.
+    (tmp_path / ".tc-fitness.toml").write_text(
+        "[[steps]]\nid = 'f'\ncatalogue = 'scripts.checks.cat:ALL'\n[core_checks.no_duplicate_string]\nroots = ['lib']\n"
+    )
+    configs = load_core_check_configs(tmp_path)
+    assert configs["no_duplicate_string"]["roots"] == ["lib"]
+
+
+def test_load_core_check_configs_no_config_file_is_empty(tmp_path: Path) -> None:
+    assert load_core_check_configs(tmp_path) == {}

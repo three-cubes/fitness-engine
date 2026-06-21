@@ -15,6 +15,49 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+## [v0.6.1] — CORE-check config injection (the v0.6.0 checks become consumable)
+
+Wires the documented `[tool.tc_fitness.core_checks.<module>]` config through the
+dispatch path so a bound `core:` entry **actually scans the configured tree and
+gates on real violations**. In v0.6.0 a consumer could add a
+`RuleEntry(check="core:no_duplicate_string")` row, but the runner imported the
+module and called its `main()` with NO config — so the rule ran with its
+repo-neutral class defaults (`roots=()` → zero files enumerated → a vacuous
+pass), and a `dispatch="subprocess"` repo hit a hard "check script not found"
+on the non-existent `tc_fitness/core_checks/<module>.py` path. The CORE checks
+were inert. This release makes them consumable.
+
+Purely additive over v0.6.0: every existing `runner` / `gate` / `gate_config` /
+`core_checks` signature is unchanged (the new behaviour rides new keyword
+arguments with safe defaults), so a consumer that binds no `core:` row — or is
+pinned to `@v0.6.0` / `@v0.5.0` — is unaffected.
+
+### Added
+
+- **`tc_fitness.gate_config.load_core_check_configs` / `parse_core_check_configs`**
+  — read the `[tool.tc_fitness.core_checks.<module>]` sub-tables (from the same
+  `.tc-fitness.toml` / `pyproject.toml` source the gate uses) into a
+  `dict[module_name, config_block]`.
+- **`RunnerConfig.core_check_configs` + `RunnerConfig.establish_baseline`**, and
+  matching keyword arguments on `runner.run(...)` and `runner.main_cli(...)`
+  (plus a `--establish-baseline` flag on the runner CLI). A `core:<module>`
+  entry is now dispatched IN-PROCESS with its config injected via the module's
+  `build(config, repo_root=...)`, running `rule.run()` (gate vs the baseline) or
+  `rule.establish_baseline()` (adoption mode).
+- **`tc-fitness run --establish-baseline`** — the gate threads the flag into the
+  catalogue step so a consumer can freeze today's offenders for its bound CORE
+  checks with the configured roots.
+
+### Changed
+
+- A `core:` catalogue entry ALWAYS dispatches in-process, regardless of the
+  catalogue step's `dispatch` mode — it resolves to an importable
+  `tc_fitness.core_checks.<module>` with config injected, never to a script on
+  the consumer's checks dir. This closes the `dispatch="subprocess"`
+  "check script not found" failure for CORE checks.
+- `gate._run_catalogue_step` loads the consumer's CORE-check config blocks and
+  passes them (and the `--establish-baseline` flag) through to `main_cli`.
+
 ## [v0.6.0] — the canonical CORE check set (FitnessRule ABC + keystone drift-enders)
 
 Promotes the shared fitness machinery so every repo **INHERITS** the canonical

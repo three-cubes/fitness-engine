@@ -56,7 +56,9 @@ from tc_fitness.gate_config import (
     StepSpec,
     find_config_file,
     load_config,
+    load_core_check_configs,
     parse_config,
+    parse_core_check_configs,
 )
 from tc_fitness.keystone import (
     CatalogueConsistencyReport,
@@ -141,7 +143,7 @@ from tc_fitness.staged import (
 try:
     __version__ = _metadata.version("three-cubes-fitness")
 except _metadata.PackageNotFoundError:  # pragma: no cover - only when not installed
-    __version__ = "0.6.0"
+    __version__ = "0.6.1"
 
 __all__ = [
     "__version__",
@@ -185,6 +187,8 @@ __all__ = [
     "find_config_file",
     "parse_config",
     "load_config",
+    "parse_core_check_configs",
+    "load_core_check_configs",
     "GateOutcome",
     "StepResult",
     "run_gate",

@@ -69,6 +69,7 @@ Exactly one of ``run`` / ``shell`` / ``catalogue`` is required per step.
 from __future__ import annotations
 
 import tomllib  # stdlib since 3.11; requires-python is >=3.12
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -86,6 +87,15 @@ _DEDICATED_FILE = ".tc-fitness.toml"
 _PYPROJECT = "pyproject.toml"
 
 _DISPATCH_MODES = ("inprocess", "subprocess")
+
+#: The sub-table under ``[tool.tc_fitness]`` keyed by CORE-check module name that
+#: carries each bound CORE check's config block. A consumer writes
+#: ``[tool.tc_fitness.core_checks.no_duplicate_string]`` (in pyproject.toml) or
+#: ``[core_checks.no_duplicate_string]`` (in a dedicated ``.tc-fitness.toml``);
+#: the engine injects the matching block into the rule via
+#: :meth:`tc_fitness.fitness_rule.FitnessRule.from_config` when it dispatches a
+#: ``core:<module>`` catalogue entry.
+_CORE_CHECKS_KEY = "core_checks"
 
 
 @dataclass(frozen=True)
@@ -324,11 +334,66 @@ def load_config(repo_root: Path) -> GateConfig:
     return parse_config(table, source=source)
 
 
+def parse_core_check_configs(table: Mapping[str, Any], *, source: Path) -> dict[str, Mapping[str, Any]]:
+    """Extract the ``[tool.tc_fitness.core_checks.<module>]`` blocks from ``table``.
+
+    ``table`` is the resolved tc_fitness config table (the ``[tool.tc_fitness]``
+    sub-table for a ``pyproject.toml``, or the whole document for a
+    ``.tc-fitness.toml``). Returns a mapping ``module_name -> config_block`` for
+    every CORE check the consumer has supplied a config block for. A missing
+    ``core_checks`` table yields an empty mapping (no consumer has bound a CORE
+    check, or every bound check relies on the rule's class-attribute defaults).
+
+    Separated from the file read (mirrors :func:`parse_config`) so a test can
+    drive it from an in-memory dict.
+    """
+    raw = table.get(_CORE_CHECKS_KEY)
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise GateConfigError(
+            f"[tool.tc_fitness.{_CORE_CHECKS_KEY}] in {source.name} must be a table of "
+            "per-module config blocks; "
+            f"fix: write `[tool.tc_fitness.{_CORE_CHECKS_KEY}.<module>]` sub-tables; "
+            "next: re-run tc-fitness run"
+        )
+    out: dict[str, Mapping[str, Any]] = {}
+    for module_name, block in raw.items():
+        if not isinstance(block, dict):
+            raise GateConfigError(
+                f"[tool.tc_fitness.{_CORE_CHECKS_KEY}.{module_name}] in {source.name} must be a "
+                "table; "
+                f"fix: write `[tool.tc_fitness.{_CORE_CHECKS_KEY}.{module_name}]` with the check's "
+                "roots / extensions / thresholds; "
+                "next: re-run tc-fitness run"
+            )
+        out[str(module_name)] = block
+    return out
+
+
+def load_core_check_configs(repo_root: Path) -> dict[str, Mapping[str, Any]]:
+    """Resolve the ``[tool.tc_fitness.core_checks.<module>]`` config blocks.
+
+    Reads the SAME config source the gate uses (``.tc-fitness.toml`` wins over
+    ``pyproject.toml``'s ``[tool.tc_fitness]``), so a consumer's CORE-check config
+    lives beside its gate declaration. Returns ``{}`` when no config file exists
+    (a repo with no gate config binds no CORE check), so a caller can always
+    treat the result as a plain mapping.
+    """
+    source = find_config_file(repo_root)
+    if source is None:
+        return {}
+    table = _raw_table(source)
+    return parse_core_check_configs(table, source=source)
+
+
 __all__ = [
     "GateConfig",
     "GateConfigError",
     "StepSpec",
     "find_config_file",
     "load_config",
+    "load_core_check_configs",
     "parse_config",
+    "parse_core_check_configs",
 ]

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "three-cubes-fitness"
-version = "0.6.0"
+version = "0.6.1"
 description = "Shared architecture-fitness primitives + the single runnable quality gate for Three Cubes repos (kairix, tc-agent-zone): the `tc-fitness run` gate orchestrator (one binary CI and local both invoke), baseline-gating helpers, agent-actionable emit/YAML helpers, the unified ratchet grammar, the catalogue-driven repo-agnostic check runner, and the declarative seam-absorption factories + branch-naming gate."
 readme = "README.md"
 requires-python = ">=3.12"

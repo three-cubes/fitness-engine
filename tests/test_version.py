@@ -26,9 +26,9 @@ def test_version_matches_installed_metadata() -> None:
     assert tc_fitness.__version__ == metadata_version
 
 
-def test_version_is_unreleased_v0_6_0() -> None:
-    # v0.6.0 promotes the canonical CORE check set (FitnessRule ABC + per-file
-    # baseline + keystone drift-enders). The literal stays at 0.6.0 throughout
-    # so the CHANGELOG entry is honest and the fallback literal tracks the
-    # pyproject version.
-    assert tc_fitness.__version__ == "0.6.0"
+def test_version_is_unreleased_v0_6_1() -> None:
+    # v0.6.1 wires the [tool.tc_fitness.core_checks.<module>] config through the
+    # dispatch path + forces core: entries in-process, so a bound CORE check is
+    # actually consumable. The literal stays at 0.6.1 throughout so the CHANGELOG
+    # entry is honest and the fallback literal tracks the pyproject version.
+    assert tc_fitness.__version__ == "0.6.1"
