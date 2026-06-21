@@ -26,9 +26,9 @@ def test_version_matches_installed_metadata() -> None:
     assert tc_fitness.__version__ == metadata_version
 
 
-def test_version_is_unreleased_v0_5_0() -> None:
-    # v0.5.0 develops the `tc-fitness run` single-runnable-gate surface (tagged
-    # only at review + merge). The literal stays at 0.5.0 throughout so the
-    # CHANGELOG entry is honest and the fallback literal tracks the pyproject
-    # version.
-    assert tc_fitness.__version__ == "0.5.0"
+def test_version_is_unreleased_v0_6_0() -> None:
+    # v0.6.0 promotes the canonical CORE check set (FitnessRule ABC + per-file
+    # baseline + keystone drift-enders). The literal stays at 0.6.0 throughout
+    # so the CHANGELOG entry is honest and the fallback literal tracks the
+    # pyproject version.
+    assert tc_fitness.__version__ == "0.6.0"

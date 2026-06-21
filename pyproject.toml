@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "three-cubes-fitness"
-version = "0.5.0"
+version = "0.6.0"
 description = "Shared architecture-fitness primitives + the single runnable quality gate for Three Cubes repos (kairix, tc-agent-zone): the `tc-fitness run` gate orchestrator (one binary CI and local both invoke), baseline-gating helpers, agent-actionable emit/YAML helpers, the unified ratchet grammar, the catalogue-driven repo-agnostic check runner, and the declarative seam-absorption factories + branch-naming gate."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -73,6 +73,11 @@ ignore = ["E501", "RUF022"]
 # The branch-naming gate shells out to `git` by name (S607) — a fixed, trusted
 # argv0, not a partial path under attacker control.
 "src/tc_fitness/checks/branch_naming.py" = ["S607"]
+# The keystone drift-enders resolve git history (prev-tag, added-files, baseline
+# content at a ref) by invoking `git` by name with a fixed argv0 and
+# config-declared refs — the same trusted-argv0 posture as branch_naming, not
+# input under attacker control (S603/S607).
+"src/tc_fitness/keystone.py" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.12"

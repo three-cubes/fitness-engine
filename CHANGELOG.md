@@ -15,6 +15,48 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+## [v0.6.0] — the canonical CORE check set (FitnessRule ABC + keystone drift-enders)
+
+Promotes the shared fitness machinery so every repo **INHERITS** the canonical
+checks via its catalogue instead of reimplementing them. The engine now ships
+the `FitnessRule` ABC, the per-file baseline I/O (with an `--establish-baseline`
+adoption mode), and the three keystone drift-enders that turn every per-file
+baseline into a one-way ratchet. The first CORE check (`no_duplicate_string`)
+ships as the copy-pattern subsequent CORE checks follow.
+
+Purely additive over v0.5.0: every existing `runner` / `catalogue` / `lib` /
+`staged` / `context` / `gate` / `gate_config` signature is unchanged, and the
+new CORE surface is opt-in — a consumer binds a CORE check from its catalogue
+only when it repins to `@v0.6.0`. A consumer pinned to `@v0.5.0` / `@v0.4.1` is
+unaffected.
+
+### Added
+
+- **`tc_fitness.fitness_rule.FitnessRule`** — the repo-AGNOSTIC, config-driven
+  ABC. A concrete CORE check sets `name` + `remediation` + one
+  `file_has_violation(path)` method; loading the per-file baseline, enumerating
+  in-scope files, applying the scope predicate, and gating on NET-NEW violations
+  vs the baseline are inherited. Every repo-specific knob (`roots`,
+  `extensions`, `exempt_files`, `name`) arrives through `FitnessRule.from_config`
+  from the consumer's `[tool.tc_fitness]` entry — no repo identity is baked in.
+- **`tc_fitness.baseline`** — the canonical per-file baseline I/O:
+  `.architecture/baseline/<name>-files.txt` (one canonical `-files.txt` suffix),
+  `load_baseline` / `establish_baseline` / `render_baseline` / `parse_baseline_text`.
+  The `establish_baseline` mode writes today's offenders (with a mandatory
+  leading comment block carrying the SHRINK-ONLY contract) so adopting a new
+  rule never breaks the build.
+- **`tc_fitness.keystone`** — the three drift-enders, all config-driven:
+  `net_new_violations_forbidden` (an added file may not appear in any baseline),
+  `baseline_shrink_only` (baselines may only shrink across a release boundary),
+  and `catalogue_check_consistency` (every catalogued entry ↔ a real check,
+  bidirectional).
+- **`tc_fitness.core_checks`** — the CORE-check-module convention + the shared
+  `run_core_check` `main()` body (parses `--establish-baseline` / `--repo-root`).
+- **`tc_fitness.core_checks.no_duplicate_string`** — the first CORE check (Sonar
+  S1192) and the exemplar copy-pattern: a `FitnessRule` subclass + `build()`
+  factory + `main()`, with the `min_length` / `min_occurrences` thresholds read
+  from config.
+
 ## [v0.5.0] — `tc-fitness run`, the single runnable gate (EPIC #499 common-process)
 
 Adds the **single runnable quality gate both CI and local invoke** — the binary

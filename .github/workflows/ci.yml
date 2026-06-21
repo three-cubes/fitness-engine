@@ -37,12 +37,21 @@ jobs:
       - name: ruff check
         run: ruff check src tests
 
-      - name: ruff format --check (gate modules)
-        # Scoped to the v0.5.0 gate modules. The pre-existing lib/ratchet/runner/
-        # staged sources predate any formatter config; a repo-wide `ruff format`
-        # pass is a separate one-time hygiene commit (it reflows files unrelated
-        # to this change). New modules are held to the formatter from day one.
-        run: ruff format --check src/tc_fitness/gate.py src/tc_fitness/gate_config.py tests/test_gate.py tests/test_gate_config.py
+      - name: ruff format --check (gate + v0.6.0 core modules)
+        # Scoped to the modules added with a formatter config (v0.5.0 gate +
+        # v0.6.0 CORE check set). The pre-existing lib/ratchet/runner/staged
+        # sources predate any formatter config; a repo-wide `ruff format` pass is
+        # a separate one-time hygiene commit (it reflows files unrelated to this
+        # change). New modules are held to the formatter from day one.
+        run: >-
+          ruff format --check
+          src/tc_fitness/gate.py src/tc_fitness/gate_config.py
+          tests/test_gate.py tests/test_gate_config.py
+          src/tc_fitness/baseline.py src/tc_fitness/fitness_rule.py
+          src/tc_fitness/keystone.py src/tc_fitness/core_checks/__init__.py
+          src/tc_fitness/core_checks/no_duplicate_string.py
+          tests/test_baseline.py tests/test_fitness_rule.py
+          tests/test_keystone.py tests/test_core_no_duplicate_string.py
 
       - name: mypy --strict
         run: mypy
