@@ -28,6 +28,19 @@ from tc_fitness.catalogue import (
     is_dispatchable,
 )
 from tc_fitness.context import CheckContext
+from tc_fitness.gate import (
+    GateOutcome,
+    StepResult,
+    run_gate,
+)
+from tc_fitness.gate_config import (
+    GateConfig,
+    GateConfigError,
+    StepSpec,
+    find_config_file,
+    load_config,
+    parse_config,
+)
 from tc_fitness.lib import (
     REPO_ROOT,
     actionable,
@@ -96,7 +109,7 @@ from tc_fitness.staged import (
 try:
     __version__ = _metadata.version("three-cubes-fitness")
 except _metadata.PackageNotFoundError:  # pragma: no cover - only when not installed
-    __version__ = "0.4.1"
+    __version__ = "0.5.0"
 
 __all__ = [
     "__version__",
@@ -133,6 +146,16 @@ __all__ = [
     "is_dispatchable",
     # context
     "CheckContext",
+    # gate orchestrator (the single runnable gate — `tc-fitness run`)
+    "GateConfig",
+    "StepSpec",
+    "GateConfigError",
+    "find_config_file",
+    "parse_config",
+    "load_config",
+    "GateOutcome",
+    "StepResult",
+    "run_gate",
     # staged selection
     "ScopeResolver",
     "EnumerationNarrower",

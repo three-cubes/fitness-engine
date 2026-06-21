@@ -1,0 +1,51 @@
+name: CI
+
+# The engine eats its own dog food: pytest + ruff + mypy on every push / PR. A
+# pure-stdlib package with dev tooling declared in pyproject [project.optional-
+# dependencies] dev, so the setup is a plain `pip install -e .[dev]` (no uv
+# workspace needed for the engine itself).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install (editable, with dev extras)
+        run: python -m pip install --upgrade pip && pip install -e ".[dev]"
+
+      - name: ruff check
+        run: ruff check src tests
+
+      - name: ruff format --check (gate modules)
+        # Scoped to the v0.5.0 gate modules. The pre-existing lib/ratchet/runner/
+        # staged sources predate any formatter config; a repo-wide `ruff format`
+        # pass is a separate one-time hygiene commit (it reflows files unrelated
+        # to this change). New modules are held to the formatter from day one.
+        run: ruff format --check src/tc_fitness/gate.py src/tc_fitness/gate_config.py tests/test_gate.py tests/test_gate_config.py
+
+      - name: mypy --strict
+        run: mypy
+
+      - name: pytest (with coverage)
+        run: pytest -q --cov=tc_fitness --cov-report=term-missing --cov-report=xml

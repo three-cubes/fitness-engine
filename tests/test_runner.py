@@ -985,12 +985,12 @@ def test_underscore_aliases_still_re_exported() -> None:
     # Back-compat: taz's private imports keep resolving until it migrates.
     from tc_fitness.runner import (
         _GREEN,
-        _print_aggregate,
         _RED,
         _RESET,
+        _YELLOW,
+        _print_aggregate,
         _select_all,
         _select_gate,
-        _YELLOW,
     )
 
     assert _print_aggregate is print_aggregate

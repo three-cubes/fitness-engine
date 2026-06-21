@@ -26,8 +26,9 @@ def test_version_matches_installed_metadata() -> None:
     assert tc_fitness.__version__ == metadata_version
 
 
-def test_version_is_unreleased_v0_4_1() -> None:
-    # v0.4.1 develops the staged-output stability fix (tagged only at review +
-    # merge). The literal stays at 0.4.1 throughout so the CHANGELOG entry is
-    # honest and the fallback literal tracks the pyproject version.
-    assert tc_fitness.__version__ == "0.4.1"
+def test_version_is_unreleased_v0_5_0() -> None:
+    # v0.5.0 develops the `tc-fitness run` single-runnable-gate surface (tagged
+    # only at review + merge). The literal stays at 0.5.0 throughout so the
+    # CHANGELOG entry is honest and the fallback literal tracks the pyproject
+    # version.
+    assert tc_fitness.__version__ == "0.5.0"

@@ -25,7 +25,6 @@ from tc_fitness.ratchet import (
     parse_overrides,
 )
 
-
 # --------------------------------------------------------------------------- #
 # Drift zone 1 — ONE override-rationale min-length (40, strictly-less-than)
 # --------------------------------------------------------------------------- #

@@ -47,7 +47,7 @@ def test_rule_entry_is_frozen() -> None:
     e = RuleEntry(id="X", gate="x", check="x")
     try:
         e.id = "Y"  # type: ignore[misc]
-    except Exception as exc:  # noqa: BLE001 - assert it's frozen, type doesn't matter
+    except Exception as exc:
         assert "cannot assign" in str(exc) or "frozen" in str(exc).lower()
     else:  # pragma: no cover - frozen dataclass must raise
         raise AssertionError("RuleEntry should be frozen")

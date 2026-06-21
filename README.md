@@ -1,12 +1,97 @@
 # three-cubes-fitness
 
-Shared architecture-fitness primitives for Three Cubes repositories
-(`kairix`, `tc-agent-zone`). This package is the **single source** for the
-helper code those repos' fitness-function checks previously maintained as two
-parallel, slowly-drifting copies. Consuming it means a fix or a behaviour change
-lands once, not twice.
+Shared architecture-fitness primitives **and the single runnable quality gate**
+for Three Cubes repositories (`kairix`, `tc-agent-zone`). This package is the
+**single source** for the helper code those repos' fitness-function checks
+previously maintained as two parallel, slowly-drifting copies. Consuming it means
+a fix or a behaviour change lands once, not twice.
 
-It ships these modules:
+## The single runnable gate (v0.5.0): `tc-fitness run`
+
+> **The engine owns the gate MACHINERY; the consumer owns the gate CONTENT.**
+> This is the load-bearing boundary. The engine knows how to run an ordered list
+> of steps and aggregate one verdict. It does **not** know, and must never bake
+> in, *which* tests a repo runs, with which `--cov` roots, which ruff/bandit
+> targets, which detect-secrets baseline, or where the repo's check-catalogue
+> lives. Every one of those is **config** — a step the consumer declares in its
+> own `[tool.tc_fitness]` block.
+
+`tc-fitness run` is the one binary both CI and local invoke, so **`local == CI`
+by construction** — there is no hand-copied pytest/lint block to drift between a
+`scripts/ci/check.sh` and a CI workflow:
+
+```bash
+uv run tc-fitness run         # local: this is what `make check` becomes
+```
+
+```yaml
+# CI: the reusable python-quality-gate.yml shrinks to
+#   checkout → setup-uv → uv run tc-fitness run
+```
+
+The consumer declares the gate **once**, in a `[tool.tc_fitness]` block in its
+`pyproject.toml` (or a dedicated `.tc-fitness.toml`):
+
+```toml
+[tool.tc_fitness]
+name = "tc-agent-zone quality gate"
+
+[[tool.tc_fitness.steps]]
+id = "deps"
+run = ["uv", "sync", "--all-packages", "--locked"]
+
+[[tool.tc_fitness.steps]]
+id = "ruff"
+run = ["ruff", "check", "scripts", "tests"]
+fix = "run `ruff check --fix scripts tests`"
+next = "re-run tc-fitness run"
+
+[[tool.tc_fitness.steps]]
+id = "bandit"
+run = ["bandit", "-r", "scripts", "-ll", "-ii", "-c", "pyproject.toml"]
+
+[[tool.tc_fitness.steps]]
+id = "tests"
+# A `shell` step is run through the shell — use it for the exact pytest line,
+# with its test dirs, `--cov` roots, markers, and `-n auto`.
+shell = "pytest -q tests -m 'not soak' -n auto --cov=scripts --cov=tools --cov-branch --cov-report=xml:coverage.xml"
+
+[[tool.tc_fitness.steps]]
+id = "secrets"
+shell = "git diff --name-only origin/main...HEAD | xargs -r detect-secrets-hook --baseline .secrets.baseline"
+
+# The fitness catalogue is dispatched IN-PROCESS via the shared runner —
+# no second python boot. It names the consumer's RuleEntry catalogue.
+[[tool.tc_fitness.steps]]
+id = "fitness"
+summary = "architecture fitness functions"
+catalogue = "scripts.checks._rule_catalogue:ALL_ENTRIES"
+checks_dir = "scripts/checks"
+dispatch = "subprocess"
+parallel = true
+```
+
+Each step is one of:
+
+| Step kind | Field | Runs as |
+|---|---|---|
+| command vector | `run = ["prog", "arg"]` | a child process (no shell) |
+| shell string | `shell = "a \| b"` | a child process through the shell (pipelines / globs / `$(...)`) |
+| catalogue | `catalogue = "module:attr"` | the consumer's `RuleEntry` catalogue, dispatched in-process via `tc_fitness.runner.main_cli` |
+
+Per-step options: `summary`, `cwd`, `env`, `allow_missing` (skip when the program
+isn't on PATH instead of failing), `continue_on_error` (record a FAIL but don't
+gate the aggregate — informational steps), and `fix:` / `next:` lines printed
+under the step's FAIL. The full schema lives in
+[`src/tc_fitness/gate_config.py`](src/tc_fitness/gate_config.py).
+
+`tc-fitness run` flags: `--repo-root` (default CWD), `--only ID` (run a subset of
+steps, repeatable), `--gate ID` (target one fitness rule inside a catalogue step).
+
+## Library modules
+
+It also ships these modules (the helpers `tc-fitness run` and a consumer's checks
+both build on):
 
 - **`tc_fitness.lib`** — the merged check helpers:
   - **baseline gating** (from kairix `scripts/checks/_arch_lib.py`):

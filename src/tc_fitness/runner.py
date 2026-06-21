@@ -82,6 +82,7 @@ from tc_fitness.staged import (
     restrict_python_files,
 )
 
+
 class Colours:
     """The ANSI colour codes the named verdict ledger uses — a public namespace.
 

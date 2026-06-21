@@ -4,29 +4,84 @@ build-backend = "hatchling.build"
 
 [project]
 name = "three-cubes-fitness"
-version = "0.4.1"
-description = "Shared architecture-fitness primitives for Three Cubes repos (kairix, tc-agent-zone): baseline-gating helpers, agent-actionable emit/YAML helpers, the unified ratchet grammar, the catalogue-driven repo-agnostic check runner, and the v0.4.0 declarative seam-absorption factories (module-roots resolver, binding narrower, env-path conditional check) + branch-naming gate."
+version = "0.5.0"
+description = "Shared architecture-fitness primitives + the single runnable quality gate for Three Cubes repos (kairix, tc-agent-zone): the `tc-fitness run` gate orchestrator (one binary CI and local both invoke), baseline-gating helpers, agent-actionable emit/YAML helpers, the unified ratchet grammar, the catalogue-driven repo-agnostic check runner, and the declarative seam-absorption factories + branch-naming gate."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "Proprietary" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{ name = "Three Cubes" }]
-keywords = ["fitness-functions", "architecture", "ratchet", "ci"]
+keywords = ["fitness-functions", "architecture", "ratchet", "ci", "quality-gate"]
 classifiers = [
+  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
 ]
 
-# Pure stdlib at runtime. PyYAML is an optional extra: load_yaml() degrades
+# Pure stdlib at runtime. The `tc-fitness run` gate orchestrator uses the stdlib
+# `tomllib` (3.11+) to read the consumer's `[tool.tc_fitness]` config, so no
+# runtime dependency is added. PyYAML is an optional extra: load_yaml() degrades
 # gracefully (returns an error string) when it is absent, so consumers that
 # never touch YAML need not install it.
 dependencies = []
 
+[project.scripts]
+# The single runnable gate. Consumers invoke `uv run tc-fitness run` (local) and
+# CI's reusable workflow invokes the same binary — one definition of the gate.
+tc-fitness = "tc_fitness.gate:main"
+
 [project.optional-dependencies]
 yaml = ["PyYAML>=6.0"]
-dev = ["pytest>=8.0", "PyYAML>=6.0"]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "PyYAML>=6.0",
+  "ruff>=0.15,<0.16",
+  "mypy>=1.11",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tc_fitness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+# Pragmatic, security-aware default set. S (bandit) is on so the gate's own
+# subprocess use is reviewed; the two genuinely-config-driven subprocess calls in
+# gate.py carry inline `# noqa: S603/S602` with a rationale.
+select = ["E", "F", "I", "UP", "B", "S", "RUF"]
+# E501  — line length is governed by `line-length`, not a hard error.
+# RUF022 — the `__all__` lists are grouped by source module with comments
+#          (lib / ratchet / catalogue / context / gate / runner), a deliberate
+#          readability layout that an isort-style alphabetic sort would destroy.
+ignore = ["E501", "RUF022"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert`, build synthetic subprocess fixtures, and
+# reference tmp paths.
+"tests/**" = ["S101", "S108", "S603", "S607", "S404"]
+# The runner IS a check dispatcher: launching `bash` / the python interpreter on
+# a config-declared script path is its whole job (S603/S607), and its
+# type-narrowing `assert cfg.checks_dir is not None` post-`__post_init__` guards
+# (S101) are invariants the loader establishes, not input validation.
+"src/tc_fitness/runner.py" = ["S101", "S603", "S607"]
+# The branch-naming gate shells out to `git` by name (S607) — a fixed, trusted
+# argv0, not a partial path under attacker control.
+"src/tc_fitness/checks/branch_naming.py" = ["S607"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_ignores = true
+files = ["src/tc_fitness"]
+
+[[tool.mypy.overrides]]
+# PyYAML is an OPTIONAL extra (load_yaml degrades gracefully when it is absent),
+# so its stubs are not a hard dependency of the type check.
+module = ["yaml"]
+ignore_missing_imports = true

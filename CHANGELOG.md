@@ -15,6 +15,65 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+## [v0.5.0] — `tc-fitness run`, the single runnable gate (EPIC #499 common-process)
+
+Adds the **single runnable quality gate both CI and local invoke** — the binary
+that makes `local == CI` true *by construction* instead of by hand-syncing two
+copies of a pytest/lint block. A consumer declares its gate ONCE in a
+`[tool.tc_fitness]` block; `tc-fitness run` reads that declaration and runs every
+step in order, aggregating one verdict. CI's reusable `python-quality-gate.yml`
+shrinks to `checkout → setup-uv → uv run tc-fitness run`; a repo's `make check`
+becomes `uv run tc-fitness run`.
+
+Purely additive over v0.4.1: every existing `lib` / `ratchet` / `runner` /
+`staged` / `catalogue` / `context` signature is unchanged, no behaviour of the
+existing surface moves, and the new gate surface is opt-in (a consumer that never
+declares a `[tool.tc_fitness]` block is unaffected). A consumer pinned to
+`@v0.4.1` keeps working unmodified; repin to `@v0.5.0` to adopt the gate.
+
+### Added
+
+- **`tc-fitness` console script** (`[project.scripts] tc-fitness =
+  "tc_fitness.gate:main"`) — invoked as `uv run tc-fitness run` / `uvx
+  tc-fitness run`. The single entrypoint both surfaces shell out to.
+- **`tc_fitness.gate`** — the step ORCHESTRATOR. Runs the declared steps in
+  config order, each as a `run` (argv) / `shell` (string) / `catalogue`
+  (in-process via `tc_fitness.runner.main_cli`) action; prints a named
+  `run [id]` / `PASS` / `FAIL` / `SKIP` ledger per step + an aggregate verdict;
+  returns non-zero iff a gating step failed. `--only ID` runs a step subset;
+  `--gate ID` targets one fitness rule inside the catalogue step;
+  `continue_on_error` records a non-gating FAIL; `allow_missing` skips a step
+  whose program isn't on PATH. Public API: `run_gate`, `GateOutcome`,
+  `StepResult`, `main`.
+- **`tc_fitness.gate_config`** — the declarative `[tool.tc_fitness]` schema +
+  loader. Resolves `.tc-fitness.toml` (whole-document config) over a
+  `[tool.tc_fitness]` block in `pyproject.toml`; validates each step (exactly one
+  of `run` / `shell` / `catalogue`; unique ids; `module:attr` catalogue refs;
+  the `inprocess` / `subprocess` dispatch vocabulary) and raises an
+  agent-actionable `GateConfigError` (carrying `fix:` / `next:`) on a
+  misconfiguration. Public API: `GateConfig`, `StepSpec`, `GateConfigError`,
+  `find_config_file`, `parse_config`, `load_config`.
+- **The engine/consumer boundary is enforced by design** — nothing in the engine
+  hard-codes a consumer's pytest scope, `--cov` roots, ruff/bandit targets,
+  detect-secrets baseline, or check-catalogue path. They are all CONFIG (declared
+  steps), so the engine never recreates the caller-parameter coupling a reusable
+  workflow with `pytest-args` / `cov-roots` inputs would.
+
+### Changed
+
+- **License `Proprietary` → `Apache-2.0`** — corrects an incoherent
+  proprietary marker on a public repo. A `LICENSE` file is now shipped and
+  `license-files` references it (PEP 639). No code or signature change.
+
+### Repo hygiene (engine self-CI)
+
+- A repo-self-CI workflow (`.github/workflows/ci.yml`) now runs `pytest` +
+  `ruff check` + `mypy --strict` on every push / PR — the engine eats its own
+  dog food. A pinned `[tool.ruff]` + `[tool.mypy]` config makes both green over
+  the package (the runner's subprocess dispatch + type-narrowing asserts carry
+  scoped per-file ignores; the optional PyYAML import is marked
+  `ignore_missing_imports`).
+
 ## [v0.4.1] — byte-stable `--staged` output (EPIC #499 common-process)
 
 Makes `--staged` / staged-dispatch output **byte-stable**, matching the quality

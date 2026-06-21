@@ -31,8 +31,9 @@ on the default.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # kairix _arch_lib surface — baseline gating
@@ -392,22 +393,22 @@ def load_yaml(path: Path) -> tuple[Any, str | None]:
         return None, f"invalid YAML — {e}"
 
 
-def missing_keys(parsed: dict, required: tuple[str, ...]) -> list[str]:
+def missing_keys(parsed: dict[str, Any], required: tuple[str, ...]) -> list[str]:
     """Return the subset of ``required`` keys that are absent in ``parsed``."""
     return [k for k in required if k not in parsed]
 
 
 __all__ = [
     "REPO_ROOT",
-    "gate",
-    "gate_keys",
-    "repo_relative",
-    "python_files",
-    "main_entry",
     "actionable",
-    "remediation",
     "emit_failures",
     "emit_pass",
+    "gate",
+    "gate_keys",
     "load_yaml",
+    "main_entry",
     "missing_keys",
+    "python_files",
+    "remediation",
+    "repo_relative",
 ]
