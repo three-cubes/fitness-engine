@@ -90,3 +90,11 @@ files = ["src/tc_fitness"]
 # so its stubs are not a hard dependency of the type check.
 module = ["yaml"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# defusedxml is an OPTIONAL preference: the coverage CORE checks try it for a
+# hardened XXE-safe parse and fall back to the stdlib (after an explicit
+# DTD/entity rejection) when it is absent, so its stubs are not a hard
+# dependency of the type check.
+module = ["defusedxml", "defusedxml.*"]
+ignore_missing_imports = true

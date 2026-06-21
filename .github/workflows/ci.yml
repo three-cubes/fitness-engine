@@ -39,19 +39,36 @@ jobs:
 
       - name: ruff format --check (gate + v0.6.0 core modules)
         # Scoped to the modules added with a formatter config (v0.5.0 gate +
-        # v0.6.0 CORE check set). The pre-existing lib/ratchet/runner/staged
-        # sources predate any formatter config; a repo-wide `ruff format` pass is
-        # a separate one-time hygiene commit (it reflows files unrelated to this
-        # change). New modules are held to the formatter from day one.
+        # v0.6.0 CORE check set + every CORE check module/test). The pre-existing
+        # lib/ratchet/runner/staged sources predate any formatter config; a
+        # repo-wide `ruff format` pass is a separate one-time hygiene commit (it
+        # reflows files unrelated to this change). The whole core_checks package
+        # and every test_core_*.py is held to the formatter from day one, so a
+        # newly added CORE check is gated automatically.
         run: >-
           ruff format --check
           src/tc_fitness/gate.py src/tc_fitness/gate_config.py
           tests/test_gate.py tests/test_gate_config.py
           src/tc_fitness/baseline.py src/tc_fitness/fitness_rule.py
-          src/tc_fitness/keystone.py src/tc_fitness/core_checks/__init__.py
-          src/tc_fitness/core_checks/no_duplicate_string.py
+          src/tc_fitness/keystone.py src/tc_fitness/core_checks/
           tests/test_baseline.py tests/test_fitness_rule.py
-          tests/test_keystone.py tests/test_core_no_duplicate_string.py
+          tests/test_keystone.py tests/_core_check_assertions.py
+          tests/test_core_no_duplicate_string.py
+          tests/test_core_registry_consistency.py
+          tests/test_core_security_freshness_design_law.py
+          $(printf 'tests/test_core_%s.py ' \
+            actionable_feedback adr_number_unique ci_fanin_parity \
+            ci_silencers_have_rationale cognitive_complexity coverage_floor \
+            coverage_includes_branches empty_body_intent every_test_has_tier_marker \
+            license_present mutation_survival_ratchet no_commented_out_code \
+            no_env_monkeypatch no_hardcoded_repo_paths no_internal_monkeypatch \
+            no_internal_patches no_internal_patches_ts \
+            no_language_suffix_in_package_names no_logging_secrets \
+            no_noop_test_scripts no_production_suppressions no_real_names \
+            no_test_imports_in_prod no_test_only_kwargs path_naming \
+            posix_path_serialisation readme_resolver_coverage schema_conformance \
+            script_help_smoke shellcheck_disable_with_reason sonar_ignore_rationale \
+            suppressions_have_rationale test_skip_rationale unused_params_named)
 
       - name: mypy --strict
         run: mypy

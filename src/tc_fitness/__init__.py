@@ -38,7 +38,12 @@ from tc_fitness.catalogue import (
     is_dispatchable,
 )
 from tc_fitness.context import CheckContext
-from tc_fitness.core_checks import run_core_check
+from tc_fitness.core_checks import (
+    CORE_CHECKS,
+    core_check_consistency,
+    discover_core_check_modules,
+    run_core_check,
+)
 from tc_fitness.fitness_rule import FitnessRule
 from tc_fitness.gate import (
     GateOutcome,
@@ -102,6 +107,8 @@ from tc_fitness.runner import (
     RunnerConfig,
     SkipLineFn,
     Verdicts,
+    core_module_name,
+    is_core_check,
     main_cli,
     make_env_path_conditional_check,
     print_aggregate,
@@ -204,6 +211,8 @@ __all__ = [
     "SkipLineFn",
     "make_env_path_conditional_check",
     "resolve_script",
+    "is_core_check",
+    "core_module_name",
     "staged_paths",
     "select_all",
     "select_gate",
@@ -222,6 +231,10 @@ __all__ = [
     # v0.6.0 — FitnessRule ABC + CORE-check convention
     "FitnessRule",
     "run_core_check",
+    # v0.6.0 — engine CORE-check registry (catalogue ↔ modules consistency)
+    "CORE_CHECKS",
+    "discover_core_check_modules",
+    "core_check_consistency",
     # v0.6.0 — keystone drift-enders
     "load_all_baselines",
     "find_net_new_violations",

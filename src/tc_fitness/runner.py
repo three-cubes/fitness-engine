@@ -108,6 +108,29 @@ _RESET = Colours.RESET
 
 _SHELL_SUFFIX = ".sh"
 
+#: Namespace prefix marking a catalogue ``check`` as an engine CORE check
+#: (``check="core:no_duplicate_string"``). A ``core:`` check resolves to the
+#: importable module ``tc_fitness.core_checks.<module>`` and always dispatches
+#: in-process (pure-python, no runtime arg). v0.5.0 consumers that bind no
+#: ``core:`` row are unaffected.
+_CORE_PREFIX = "core:"
+_CORE_PACKAGE = "tc_fitness.core_checks"
+
+
+def is_core_check(entry: RuleEntry) -> bool:
+    """True iff ``entry`` binds an engine CORE check via the ``core:`` namespace."""
+    return entry.check.startswith(_CORE_PREFIX)
+
+
+def core_module_name(entry: RuleEntry) -> str:
+    """The fully-qualified module for a ``core:<module>`` entry.
+
+    ``check="core:no_duplicate_string"`` → ``tc_fitness.core_checks.no_duplicate_string``.
+    """
+    module = entry.check[len(_CORE_PREFIX) :]
+    return f"{_CORE_PACKAGE}.{module}"
+
+
 #: Default cap on parallel subprocess workers — subprocess-IO bound, so
 #: threads are fine; capped to avoid over-saturating CI runners.
 _DEFAULT_MAX_WORKERS = 8
@@ -308,18 +331,26 @@ class RunnerConfig:
 
 def resolve_script(entry: RuleEntry) -> str:
     """Return the check-script filename for ``entry`` — the ``script``
-    override, or the default ``check_<check>.py``."""
+    override, the engine CORE module path (``core:`` namespace), or the default
+    ``check_<check>.py``."""
     if entry.script:
         return entry.script
+    if is_core_check(entry):
+        # Informational display string; the in-process loader resolves the
+        # real importable module via ``core_module_name``.
+        return f"{core_module_name(entry).replace('.', '/')}.py"
     return f"check_{entry.check}.py"
 
 
 def _dispatches_in_process(entry: RuleEntry) -> bool:
     """True iff ``entry``'s check runs in-process (pure-python, no runtime
     arg). A ``.sh`` script or a check declaring a ``subprocess_arg_env`` runs
-    as a guarded subprocess instead."""
+    as a guarded subprocess instead. An engine CORE check is always pure-python
+    and always dispatches in-process."""
     if entry.subprocess_arg_env is not None:
         return False
+    if is_core_check(entry):
+        return True
     return not resolve_script(entry).endswith(_SHELL_SUFFIX)
 
 
@@ -354,8 +385,19 @@ def _conditional_arg_path(entry: RuleEntry, cfg: RunnerConfig) -> Path | None:
 # ── per-rule dispatch ────────────────────────────────────────────────────
 
 
-def _load_check_main(script: str) -> Callable[[], int]:
-    """Import the check module for ``script`` and return a zero-arg callable
+def _module_name_for(entry: RuleEntry) -> str:
+    """The importable module name for ``entry``'s in-process check.
+
+    An engine CORE check resolves to ``tc_fitness.core_checks.<module>``; a
+    local check resolves to the script filename stem (importable because the
+    consumer's checks dir is on ``sys.path``)."""
+    if is_core_check(entry):
+        return core_module_name(entry)
+    return resolve_script(entry)[: -len(".py")]
+
+
+def _load_check_main(module_name: str) -> Callable[[], int]:
+    """Import the check module ``module_name`` and return a zero-arg callable
     that invokes its ``main``.
 
     Some checks declare ``main(argv: list[str] | None = None)`` and default to
@@ -363,7 +405,6 @@ def _load_check_main(script: str) -> Callable[[], int]:
     ``sys.argv`` is the RUNNER's flags, which the check's parser would reject.
     So when ``main`` accepts an ``argv`` parameter we pass an explicit empty
     list — reproducing the no-arguments subprocess invocation."""
-    module_name = script[: -len(".py")]
     module = importlib.import_module(module_name)
     main_fn = module.main
     accepts_argv = bool(inspect.signature(main_fn).parameters)
@@ -402,7 +443,7 @@ def _run_one_inprocess(entry: RuleEntry, cfg: RunnerConfig) -> int:
     crashed = False
     rc = 1
     try:
-        check_main = _load_check_main(script)
+        check_main = _load_check_main(_module_name_for(entry))
         with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
             result = check_main()
         rc = result if isinstance(result, int) else 1
@@ -992,6 +1033,8 @@ __all__ = [
     "SkipLineFn",
     "make_env_path_conditional_check",
     "resolve_script",
+    "is_core_check",
+    "core_module_name",
     "staged_paths",
     "select_all",
     "select_gate",

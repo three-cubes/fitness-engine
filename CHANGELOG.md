@@ -56,6 +56,57 @@ unaffected.
   S1192) and the exemplar copy-pattern: a `FitnessRule` subclass + `build()`
   factory + `main()`, with the `min_length` / `min_occurrences` thresholds read
   from config.
+- **34 promoted CORE checks** — the canonical fitness check set every repo would
+  otherwise reimplement, each ported from the kairix F-series and/or
+  tc-agent-zone `scripts/checks/` and re-expressed as a repo-AGNOSTIC,
+  config-driven `FitnessRule` subclass (its `roots` / `extensions` /
+  `exempt_files` / thresholds arrive via the consumer's `[tool.tc_fitness]`
+  entry; the engine modules bake in zero repo identity). Each binds from a
+  consumer's catalogue via a `RuleEntry(check="core:<module>")` row:
+  - _Maintainability / suppressions_ — `cognitive_complexity` (S3776),
+    `no_commented_out_code` (S125), `unused_params_named` (S1172),
+    `empty_body_intent` (S1186), `no_production_suppressions`,
+    `suppressions_have_rationale`, `sonar_ignore_rationale`,
+    `shellcheck_disable_with_reason`, `ci_silencers_have_rationale`.
+  - _Security / freshness_ — `no_real_names`, `no_logging_secrets`,
+    `no_internal_patches`, `no_internal_patches_ts`, `license_present`,
+    `adr_number_unique`.
+  - _Test discipline_ — `test_skip_rationale`, `every_test_has_tier_marker`,
+    `no_test_only_kwargs`, `no_env_monkeypatch`, `no_internal_monkeypatch`,
+    `no_test_imports_in_prod`, `no_noop_test_scripts`, `script_help_smoke`.
+  - _Naming / paths / docs_ — `posix_path_serialisation`,
+    `no_hardcoded_repo_paths`, `path_naming`,
+    `no_language_suffix_in_package_names`, `readme_resolver_coverage`,
+    `actionable_feedback`, `ci_fanin_parity`.
+  - _Ratchets_ — `coverage_floor`, `coverage_includes_branches`,
+    `schema_conformance`, `mutation_survival_ratchet`.
+- **`tc_fitness.core_checks.CORE_CHECKS`** — the engine's single registry of
+  shippable CORE checks in the `core:<module>` namespace, plus
+  `discover_core_check_modules()` (the on-disk enumerator) and
+  `core_check_consistency()` (gates the registry ↔ modules bidirectionally via
+  the `catalogue_check_consistency` keystone, so the engine can never silently
+  drift from the checks it claims to ship).
+- **`core:` catalogue dispatch in the runner** — `is_core_check` /
+  `core_module_name` resolve a `RuleEntry(check="core:<module>")` to
+  `tc_fitness.core_checks.<module>` and always dispatch it in-process. A v0.5.0
+  consumer that binds no `core:` row is unaffected.
+
+### Deferred to v0.6.1
+
+The CORE promotion deliberately leaves checks whose shape does not fit the
+v0.6.0 per-file-baseline `FitnessRule` ABC (a violation keyed on a single file
+path) for a v0.6.1 that adds the missing base classes:
+
+- A **keyed-rule base** over `gate_keys` (ID-keyed, `-ids.txt` baseline, stale
+  handling) for the inventory-coupled `operator_outcome_tests` (F30) and
+  `interface_has_contract_test` (FEAT-150 G1).
+- A **command-freshness base** (run a generator/tool, fail on dirty output) for
+  `secret_baseline_fresh` and `generated_artifact_fresh`.
+- A **consistency-pair / set-reconciliation shape** for
+  `required_github_secrets_declared` and `manifest_consistency`.
+- A **before/after RatchetRule** (API delta + override grammar) for
+  `sonar_quality_ratchet`, and a route-matcher engine primitive for
+  `toolpack_route_tests_pass`.
 
 ## [v0.5.0] — `tc-fitness run`, the single runnable gate (EPIC #499 common-process)
 
