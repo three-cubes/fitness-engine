@@ -34,7 +34,7 @@ jobs:
       # `dev` optional-dependency group (ruff / mypy / pytest …) into the locked
       # .venv, so the gate step runs the CI-equivalent toolchain.
       - name: Locked uv install (org composite)
-        uses: three-cubes/ci-workflows/actions/setup-uv-cached@d0b27934d2906b8913420cd37a4134dd52cf80f3 # v1
+        uses: three-cubes/tc-pipelines/actions/setup-uv-cached@d0b27934d2906b8913420cd37a4134dd52cf80f3 # v1
         with:
           python-version: ${{ matrix.python-version }}
           sync-args: "--all-extras"
