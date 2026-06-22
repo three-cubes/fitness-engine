@@ -268,14 +268,14 @@ Pin to a tag in your `pyproject.toml` (git install — no PyPI publish):
 dev = [
   # kairix stays on v0.1.0 (the additions are a no-op for it); tc-agent-zone
   # pins v0.2.0 for the gate_keys / remediation / run-marker / min_len surface.
-  "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.2.0",
+  "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.2.0",
 ]
 ```
 
 or, equivalently, on the command line:
 
 ```bash
-pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.2.0"
+pip install "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.2.0"
 ```
 
 Always pin a tag, never `@main` — the version is the contract the gates depend on.

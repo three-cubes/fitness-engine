@@ -8,7 +8,7 @@ catalogue-driven, repo-agnostic RUNNER (:mod:`runner`, :mod:`context`,
 
 Pin to a git tag when consuming::
 
-    pip install "three-cubes-fitness @ git+https://github.com/three-cubes/fitness-engine.git@v0.3.0"
+    pip install "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.3.0"
 
 v0.3.0 is additive over v0.2.0: every v0.1.0 / v0.2.0 signature and behaviour is
 unchanged. The runner is a new, optional surface — a consumer's ``run_checks.py``
