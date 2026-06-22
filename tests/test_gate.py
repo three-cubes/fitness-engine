@@ -290,6 +290,82 @@ def test_catalogue_step_unresolvable_ref_is_a_fail(repo: Path, capsys: pytest.Ca
 
 
 # --------------------------------------------------------------------------- #
+# --staged smoke tier — the <60s fast-feedback entrypoint
+# --------------------------------------------------------------------------- #
+
+
+def test_staged_catalogue_step_uses_staged_selection(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # With --staged and NO staged paths, the runner's staged selection runs
+    # every rule (fail-safe), printing its staged banner — proving the catalogue
+    # was dispatched in --staged mode, not --all.
+    _write_synthetic_catalogue(repo)
+    _write_config(
+        repo,
+        '[[steps]]\nid = "fitness"\ncatalogue = "scripts.checks.synthetic_cat:ALL_ENTRIES"\n'
+        'checks_dir = "scripts/checks"\n',
+    )
+    outcome = run_gate(load_config(repo), repo, staged=True)
+    out = _plain(capsys.readouterr().out)
+    assert outcome.ok
+    assert "staged smoke" in out  # the smoke banner
+    assert "staged selection:" in out  # the runner's --staged ledger footer
+
+
+def test_staged_skips_steps_flagged_skip_when_staged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # An expensive full-tree leg flagged skip_when_staged is dropped from the
+    # smoke with a transparent SKIP; the cheap leg still runs.
+    _write_config(
+        repo,
+        '[[steps]]\nid = "cheap"\nrun = ["true"]\n'
+        '[[steps]]\nid = "expensive"\nrun = ["false"]\nskip_when_staged = true\n',
+    )
+    outcome = run_gate(load_config(repo), repo, staged=True)
+    out = _plain(capsys.readouterr().out)
+    # The failing expensive leg was skipped, so the smoke is green.
+    assert outcome.ok
+    assert "SKIP [expensive]" in out
+    assert "skip_when_staged" in out
+    assert "PASS [cheap]" in out
+
+
+def test_non_staged_run_still_runs_skip_when_staged_steps(repo: Path) -> None:
+    # skip_when_staged ONLY affects --staged; a normal full run still executes
+    # the flagged step (so it gates as before).
+    _write_config(
+        repo,
+        '[[steps]]\nid = "expensive"\nrun = ["false"]\nskip_when_staged = true\n',
+    )
+    assert not run_gate(load_config(repo), repo, staged=False).ok
+
+
+def test_staged_gate_id_wins_over_staged(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # An explicit --gate target is the narrower intent and wins over --staged.
+    _write_synthetic_catalogue(repo)
+    _write_config(
+        repo,
+        '[[steps]]\nid = "f"\ncatalogue = "scripts.checks.synthetic_cat:ALL_ENTRIES"\n'
+        'checks_dir = "scripts/checks"\n',
+    )
+    run_gate(load_config(repo), repo, gate_id="A1", staged=True)
+    out = _plain(capsys.readouterr().out)
+    assert "run [A1]" in out
+    assert "run [B1]" not in out  # gate_id narrowed, not staged-selected
+
+
+def test_main_staged_flag_threads_through(repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_config(
+        repo,
+        '[[steps]]\nid = "cheap"\nrun = ["true"]\n'
+        '[[steps]]\nid = "expensive"\nrun = ["false"]\nskip_when_staged = true\n',
+    )
+    # Without --staged the failing expensive step gates → exit 1.
+    assert main(["run", "--repo-root", str(repo)]) == 1
+    # With --staged it is dropped → exit 0.
+    assert main(["run", "--repo-root", str(repo), "--staged"]) == 0
+    assert "SKIP [expensive]" in _plain(capsys.readouterr().out)
+
+
+# --------------------------------------------------------------------------- #
 # main() — the console entrypoint
 # --------------------------------------------------------------------------- #
 

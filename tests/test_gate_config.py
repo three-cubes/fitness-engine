@@ -193,6 +193,15 @@ def test_optional_step_fields_default(tmp_path: Path) -> None:
     assert step.continue_on_error is False
     assert step.fix == ""
     assert step.next == ""
+    assert step.skip_when_staged is False
+
+
+def test_skip_when_staged_parses(tmp_path: Path) -> None:
+    cfg = parse_config_table(
+        "[[steps]]\nid = 'x'\nrun = ['a']\nskip_when_staged = true\n",
+        tmp_path,
+    )
+    assert cfg.steps[0].skip_when_staged is True
 
 
 def test_step_fix_next_and_flags_parse(tmp_path: Path) -> None:

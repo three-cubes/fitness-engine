@@ -1,0 +1,33 @@
+# CODEOWNERS — TWO-TIER review routing (Golden Path).
+#
+# Model: AUTONOMOUS work, HITL control plane.
+#   - WORK changes merge on a GREEN gate with no human (the ruleset's
+#     required_approving_review_count = 0). The gate is the control — so it must
+#     stay deterministic and trustworthy because nothing else gates work.
+#   - CONTROL-PLANE changes — the gate's OWN definition (this repo IS the gate
+#     engine) — are HITL: a PR touching an owned path below needs a human
+#     maintainer's approval (require_code_owner_review). An agent must never be
+#     able to weaken the gate that gates it.
+#
+# Source: tc-pipelines/governance/CODEOWNERS (the canonical Golden Path template).
+# There is deliberately NO `* @OWNER` line — a default owner would force review
+# on EVERY PR. Own only the control plane.
+
+# ── CI / CD / automation (defines how things build, test, and merge) ─────────
+/.github/                    @quanyeomans
+/CODEOWNERS                  @quanyeomans
+/.github/CODEOWNERS          @quanyeomans
+
+# Dependency-update policy + the bot's review routing: a Dependabot PR touches
+# manifests/lockfiles/actions owned below, so it routes to a human owner (the
+# `reviewers:` key in dependabot.yml is deprecated by GitHub in favour of this).
+/.github/dependabot.yml      @quanyeomans
+
+# ── The gate's definition (what "green" means) ───────────────────────────────
+/pyproject.toml              @quanyeomans   # [tool.tc_fitness] gate config + dependency pins
+/uv.lock                     @quanyeomans
+/.python-version             @quanyeomans
+/src/tc_fitness/             @quanyeomans   # the gate engine itself — its rules ARE the control plane
+
+# ── Security / governance / provenance ───────────────────────────────────────
+/LICENSE                     @quanyeomans

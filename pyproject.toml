@@ -157,19 +157,26 @@ next = "re-run `tc-fitness run`"
 
 # mypy --strict over the package. `strict = true` + `files = ["src/tc_fitness"]`
 # live in [tool.mypy], so a bare `mypy` is already the strict, scoped check.
+# Dropped from the `--staged` <60s smoke (skip_when_staged): a whole-package
+# strict type check is a full-tree leg, not a per-staged-file smoke. The full
+# `tc-fitness run` (CI + the merge bar) still runs it.
 [[tool.tc_fitness.steps]]
 id = "mypy"
 summary = "mypy --strict src/tc_fitness"
 run = ["mypy"]
+skip_when_staged = true
 fix = "resolve the type error mypy reports"
 next = "re-run `tc-fitness run`"
 
 # pytest with coverage — the engine's self-test suite (the same command ci.yml
-# ran), producing coverage.xml for the downstream Sonar handoff.
+# ran), producing coverage.xml for the downstream Sonar handoff. Dropped from
+# the `--staged` <60s smoke (skip_when_staged): the full coverage run is the
+# expensive full-tree leg the smoke deliberately defers to the merge gate.
 [[tool.tc_fitness.steps]]
 id = "pytest"
 summary = "pytest (with coverage)"
 run = ["pytest", "-q", "--cov=tc_fitness", "--cov-report=term-missing", "--cov-report=xml"]
+skip_when_staged = true
 fix = "fix the failing test or the code under test"
 next = "re-run `tc-fitness run`"
 

@@ -89,7 +89,11 @@ under the step's FAIL. The full schema lives in
 [`src/tc_fitness/gate_config.py`](src/tc_fitness/gate_config.py).
 
 `tc-fitness run` flags: `--repo-root` (default CWD), `--only ID` (run a subset of
-steps, repeatable), `--gate ID` (target one fitness rule inside a catalogue step).
+steps, repeatable), `--gate ID` (target one fitness rule inside a catalogue step),
+`--staged` (the `<60s` smoke tier — catalogue steps run through the *sound*
+per-rule `--staged` selection and any step flagged `skip_when_staged` in config,
+e.g. a full `pytest`/`mypy` leg, is dropped). This is the fast-feedback
+entrypoint kairix's `safe-commit.sh --check` builds on.
 
 ## Library modules
 

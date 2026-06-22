@@ -132,6 +132,15 @@ class StepSpec:
     #: Catalogue-only: dispatch mode + parallelism (mirrors the runner kwargs).
     dispatch: str = "inprocess"
     parallel: bool = False
+    #: Whether to drop this step from the ``--staged`` smoke tier. The ``<60s``
+    #: smoke runs the catalogue step(s) in the sound per-rule ``--staged`` mode
+    #: and the CHEAP legs (lint / format / branch-naming) verbatim; a repo sets
+    #: ``skip_when_staged = true`` on its EXPENSIVE full-tree legs (a full
+    #: ``pytest`` / ``mypy --strict`` over the whole tree) so the smoke stays
+    #: fast. Default ``false`` (a step runs in the smoke unless it opts out) —
+    #: the engine bakes in no policy about which legs are "expensive"; the repo
+    #: declares it.
+    skip_when_staged: bool = False
 
     @property
     def kind(self) -> str:
@@ -285,6 +294,7 @@ def _parse_step(raw: Any, *, index: int, source: Path) -> StepSpec:
         checks_dir=(str(raw["checks_dir"]) if "checks_dir" in raw else None),
         dispatch=dispatch,
         parallel=bool(raw.get("parallel", False)),
+        skip_when_staged=bool(raw.get("skip_when_staged", False)),
     )
 
 

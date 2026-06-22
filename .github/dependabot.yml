@@ -13,6 +13,12 @@ version: 2
 #   - pip  → `/` holds pyproject.toml + uv.lock (uv-managed, pip ecosystem).
 #   - github-actions → `/` is where Dependabot discovers `.github/workflows/*`.
 #
+# Review routing: a Dependabot PR bumps the manifests / lockfile / pinned
+# actions, all of which are owned in `.github/CODEOWNERS` (the gate's control
+# plane). Review therefore routes to the human code-owner automatically — the
+# canonical Golden Path mapping. (GitHub deprecated the `reviewers:` key here in
+# favour of CODEOWNERS, so the ownership lives there, not as a key below.)
+#
 # Source: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 updates:

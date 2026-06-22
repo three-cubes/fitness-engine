@@ -15,6 +15,32 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+### Fixed
+- **branch-naming gate no longer no-ops on PRs.** On a GitHub `pull_request`
+  event the runner checks out the merge commit in *detached HEAD*, so
+  `git rev-parse --abbrev-ref HEAD` resolved to the literal `"HEAD"` (which is
+  exempt) and the convention rule **silently passed every PR**.
+  `branch_naming.current_branch()` now resolves `$GITHUB_HEAD_REF` (the
+  authoritative PR head ref) first, falling back to `git` for local/`push`
+  runs, and maps a bare detached `"HEAD"` to `None` (a clean skip). A
+  non-conforming PR branch name now **fails**; a Linear-shaped one passes. The
+  function takes an injectable `env=` for hermetic testing. Purely additive —
+  the public signature stays back-compatible (new keyword-only `env`).
+
+### Added
+- **`tc-fitness run --staged` — the canonical `<60s` smoke tier.** Dispatches
+  catalogue steps through the runner's existing *sound* per-rule `--staged`
+  selection (`tc_fitness.staged`, no false negative on a staged change) and
+  drops any step a repo flags `skip_when_staged` (its expensive full-tree legs —
+  a full `pytest` / `mypy --strict`), keeping the cheap legs (lint / format /
+  branch-naming). The fast-feedback entrypoint kairix's `safe-commit.sh --check`
+  builds on. New `StepSpec.skip_when_staged` config field (default `false`); the
+  engine bakes in no policy about which legs are "expensive" — the repo declares
+  it.
+- `branch_naming.DEFAULT_EXEMPT_PATTERNS` now exempts `agent/*` branches (the
+  autonomous-agent PR-branch convention used by the three-cubes-agent App),
+  alongside the existing `worktree-agent-*` / `renovate/` / `dependabot/`.
+
 ## [v0.6.1] — CORE-check config injection (the v0.6.0 checks become consumable)
 
 Wires the documented `[tool.tc_fitness.core_checks.<module>]` config through the

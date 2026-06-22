@@ -178,6 +178,7 @@ def _run_catalogue_step(
     gate_id: str | None,
     *,
     establish_baseline: bool = False,
+    staged: bool = False,
 ) -> StepResult:
     """Dispatch the consumer's RuleEntry catalogue via the shared runner.
 
@@ -185,6 +186,13 @@ def _run_catalogue_step(
     ``run [id]`` / ``PASS`` / ``FAIL`` ledger prints inline. The step PASSes iff
     ``main_cli`` returns 0. A ``--gate <id>`` from the CLI is threaded through so
     ``tc-fitness run --gate F26`` runs exactly one catalogue rule.
+
+    ``staged`` routes the catalogue through the runner's sound per-rule
+    ``--staged`` selection (the ``<60s`` smoke tier) — only the rules a staged
+    change could trip run, narrowed to the staged files, with the no-false-
+    negative guarantee :mod:`tc_fitness.staged` enforces. ``--gate`` wins over
+    ``--staged`` when both are given (an explicit single-rule target is the
+    narrower intent).
 
     Any ``core:<module>`` entry in the catalogue receives its
     ``[tool.tc_fitness.core_checks.<module>]`` config block (read from the SAME
@@ -216,7 +224,12 @@ def _run_catalogue_step(
         if added and repo_root_str in sys.path:
             sys.path.remove(repo_root_str)
 
-    argv = ["--gate", gate_id] if gate_id else ["--all"]
+    if gate_id:
+        argv = ["--gate", gate_id]
+    elif staged:
+        argv = ["--staged"]
+    else:
+        argv = ["--all"]
     if establish_baseline:
         argv.append("--establish-baseline")
     core_check_configs = load_core_check_configs(repo_root)
@@ -243,9 +256,12 @@ def _run_step(
     gate_id: str | None,
     *,
     establish_baseline: bool = False,
+    staged: bool = False,
 ) -> StepResult:
     if step.kind == "catalogue":
-        return _run_catalogue_step(step, repo_root, gate_id, establish_baseline=establish_baseline)
+        return _run_catalogue_step(
+            step, repo_root, gate_id, establish_baseline=establish_baseline, staged=staged
+        )
     return _run_command_step(step, repo_root)
 
 
@@ -270,6 +286,7 @@ def run_gate(
     only: list[str] | None = None,
     gate_id: str | None = None,
     establish_baseline: bool = False,
+    staged: bool = False,
 ) -> GateOutcome:
     """Run the configured steps in order; return the aggregate outcome.
 
@@ -277,9 +294,18 @@ def run_gate(
     threaded into a catalogue step so a single fitness rule can be targeted.
     ``establish_baseline`` runs the catalogue step's ``core:`` entries in
     baseline-adoption mode (freeze today's offenders) instead of gating.
+
+    ``staged`` selects the ``<60s`` smoke tier: catalogue steps run through the
+    runner's sound per-rule ``--staged`` selection, and every step a repo has
+    flagged ``skip_when_staged`` (its EXPENSIVE full-tree legs) is dropped with a
+    transparent SKIP line. The cheap legs (lint / format / branch-naming) run
+    verbatim. This is the canonical fast-feedback entrypoint
+    ``kairix``'s ``safe-commit.sh --check`` builds on.
+
     ``fail_fast`` (from the config) stops at the first gating failure.
     """
-    print(f"=== {cfg.name} ===")
+    banner = f"{cfg.name} (staged smoke)" if staged else cfg.name
+    print(f"=== {banner} ===")
     if cfg.source is not None:
         print(f"    (config: {cfg.source})")
 
@@ -296,7 +322,12 @@ def run_gate(
 
     outcome = GateOutcome()
     for step in selected:
-        result = _run_step(step, repo_root, gate_id, establish_baseline=establish_baseline)
+        if staged and step.skip_when_staged:
+            label = step.summary or step.id
+            print(f"{_YELLOW}SKIP [{step.id}]{_RESET} {label} (skip_when_staged — not in the <60s smoke)")
+            outcome.results.append(StepResult(step.id, "skip"))
+            continue
+        result = _run_step(step, repo_root, gate_id, establish_baseline=establish_baseline, staged=staged)
         outcome.results.append(result)
         if cfg.fail_fast and result.is_gating_failure:
             print(f"{_YELLOW}fail_fast: stopping at first gating failure ({step.id}){_RESET}")
@@ -313,7 +344,9 @@ def main(argv: list[str] | None = None) -> int:
 
     * ``run`` — load ``[tool.tc_fitness]`` and run the declared gate.
       ``--repo-root`` overrides CWD; ``--only ID`` runs a subset of steps;
-      ``--gate ID`` targets a single fitness rule inside a catalogue step.
+      ``--gate ID`` targets a single fitness rule inside a catalogue step;
+      ``--staged`` runs the ``<60s`` smoke tier (catalogue steps in sound
+      per-rule ``--staged`` selection; ``skip_when_staged`` legs dropped).
     """
     parser = argparse.ArgumentParser(
         prog="tc-fitness",
@@ -338,6 +371,12 @@ def main(argv: list[str] | None = None) -> int:
         help="target one fitness rule by id inside the catalogue step",
     )
     run_p.add_argument(
+        "--staged",
+        action="store_true",
+        help="the <60s smoke tier: run catalogue steps in sound per-rule --staged "
+        "mode and drop steps flagged skip_when_staged (the expensive full-tree legs)",
+    )
+    run_p.add_argument(
         "--establish-baseline",
         action="store_true",
         help="run the catalogue step's core: entries in baseline-adoption mode "
@@ -358,6 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         only=args.only,
         gate_id=args.gate,
         establish_baseline=bool(args.establish_baseline),
+        staged=bool(args.staged),
     )
     return outcome.exit_code
 
