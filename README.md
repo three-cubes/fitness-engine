@@ -1,27 +1,97 @@
-# three-cubes-fitness
+# tc-fitness (three-cubes-fitness)
 
-> **Part of the [Three Cubes Golden Path](https://github.com/three-cubes)** — the paved road every repo's quality gate, CI, and deploy derive from.
-> Sibling: **[tc-pipelines](https://github.com/three-cubes/tc-pipelines)** — the reusable CI workflows that *run* this gate (`uses: …/python-quality-gate.yml@v1`) plus the Azure-VM deploy workflows.
+**What this is:** the one quality check you run before your code can merge. You
+run `tc-fitness run` and it runs your linters, type-check, tests, coverage,
+security scan, and architecture rules, then gives you one pass or fail.
 
-Shared architecture-fitness primitives **and the single runnable quality gate**
-for Three Cubes repositories (`kairix`, `tc-agent-zone`). This package is the
-**single source** for the helper code those repos' fitness-function checks
-previously maintained as two parallel, slowly-drifting copies. Consuming it means
-a fix or a behaviour change lands once, not twice.
+**The tool knows HOW to run the checks. Your repo says WHAT to check** — you list
+the checks in a `[tool.tc_fitness]` block in your `pyproject.toml`, and
+tc-fitness runs them in order and gives you a single verdict.
 
-## The single runnable gate (v0.5.0): `tc-fitness run`
+## Why one shared check exists
 
-> **The engine owns the gate MACHINERY; the consumer owns the gate CONTENT.**
-> This is the load-bearing boundary. The engine knows how to run an ordered list
-> of steps and aggregate one verdict. It does **not** know, and must never bake
-> in, *which* tests a repo runs, with which `--cov` roots, which ruff/bandit
-> targets, which detect-secrets baseline, or where the repo's check-catalogue
-> lives. Every one of those is **config** — a step the consumer declares in its
-> own `[tool.tc_fitness]` block.
+Across many repos, the quality checks used to be hand-copied into each one. They
+slowly drifted apart, so "passing" meant something different in every repo, and a
+fix had to be re-applied by hand everywhere.
 
-`tc-fitness run` is the one binary both CI and local invoke, so **`local == CI`
-by construction** — there is no hand-copied pytest/lint block to drift between a
-`scripts/ci/check.sh` and a CI workflow:
+tc-fitness is the one check every repo uses instead of its own copy:
+
+- You run it on your laptop and get the **same result CI will give**. No
+  surprises, no "works on my machine".
+- One fix to this check improves every repo at once.
+- A new repo gets a proven setup instead of inventing its own.
+
+## How to add it to a repo
+
+1. **Install it.** Pin a specific version in your `pyproject.toml`:
+
+   ```toml
+   [project.optional-dependencies]
+   dev = [
+     "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.6.1",
+   ]
+   ```
+
+   Always pin a tag, never `@main` — the version is the contract your checks
+   depend on.
+
+2. **List your checks.** Add a `[tool.tc_fitness]` block to your `pyproject.toml`
+   (or a dedicated `.tc-fitness.toml`). Each entry is one step — a lint run, a
+   test run, a security scan, your architecture rules. See
+   [The `[tool.tc_fitness]` config](#the-tooltc_fitness-config) below for the
+   full set of fields.
+
+3. **Run it locally.** Install your full dev environment, then run the check the
+   same way CI does:
+
+   ```bash
+   uv sync --all-extras --all-groups
+   uv run tc-fitness run
+   ```
+
+   Get it green locally before you push.
+
+4. **Point CI at it.** In your GitHub Actions, the CI job shrinks to: check out
+   the code, set up `uv`, then run `uv run tc-fitness run`. The check you run
+   locally is the exact same one CI runs.
+
+## The daily loop
+
+1. Make your change on a branch.
+2. Run `uv run tc-fitness run` locally and get it green.
+3. Open a pull request.
+
+## What to expect
+
+- **Green merges itself.** When your PR's checks pass, it merges on its own.
+  Routine work does not wait for a human reviewer.
+- **Red you fix.** A failing check is never bypassed. If it fails, you fix your
+  change — you do not force it in. If it is green on your laptop but red in CI,
+  that is a bug in the local setup; fix the setup, do not force the merge.
+- **Changes to the check itself need a human.** Changing the files that define
+  the quality check or CI is the one change that needs a human to approve first.
+  That stops anyone — person or agent — from quietly weakening the check that
+  protects every repo.
+
+## Where to go next
+
+- The canonical standard index: **[tc-pipelines/governance/STANDARDS.md](https://github.com/three-cubes/tc-pipelines/blob/main/governance/STANDARDS.md)**
+  — links to everything authoritative. Improve the canonical standard; do not
+  fork your own copy.
+- **[tc-pipelines](https://github.com/three-cubes/tc-pipelines)** — the shared CI
+  and deploy steps every repo's GitHub Actions calls (`uses: …/python-quality-gate.yml@v1`).
+  These steps *run* this check.
+
+---
+
+The rest of this file is reference: the config schema, the step kinds, and the
+library modules tc-fitness ships.
+
+## The `[tool.tc_fitness]` config
+
+`tc-fitness run` is the one command both CI and your laptop invoke, so the local
+check and the CI check are the same by construction — there is no hand-copied
+pytest/lint block to drift between a `scripts/ci/check.sh` and a CI workflow.
 
 ```bash
 uv run tc-fitness run         # local: this is what `make check` becomes
@@ -32,7 +102,7 @@ uv run tc-fitness run         # local: this is what `make check` becomes
 #   checkout → setup-uv → uv run tc-fitness run
 ```
 
-The consumer declares the gate **once**, in a `[tool.tc_fitness]` block in its
+You declare the check **once**, in a `[tool.tc_fitness]` block in your
 `pyproject.toml` (or a dedicated `.tc-fitness.toml`):
 
 ```toml
@@ -63,11 +133,11 @@ shell = "pytest -q tests -m 'not soak' -n auto --cov=scripts --cov=tools --cov-b
 id = "secrets"
 shell = "git diff --name-only origin/main...HEAD | xargs -r detect-secrets-hook --baseline .secrets.baseline"
 
-# The fitness catalogue is dispatched IN-PROCESS via the shared runner —
-# no second python boot. It names the consumer's RuleEntry catalogue.
+# The architecture-rules catalogue is dispatched in-process via the shared
+# runner — no second python boot. It names your repo's RuleEntry catalogue.
 [[tool.tc_fitness.steps]]
 id = "fitness"
-summary = "architecture fitness functions"
+summary = "architecture rules"
 catalogue = "scripts.checks._rule_catalogue:ALL_ENTRIES"
 checks_dir = "scripts/checks"
 dispatch = "subprocess"
@@ -80,34 +150,34 @@ Each step is one of:
 |---|---|---|
 | command vector | `run = ["prog", "arg"]` | a child process (no shell) |
 | shell string | `shell = "a \| b"` | a child process through the shell (pipelines / globs / `$(...)`) |
-| catalogue | `catalogue = "module:attr"` | the consumer's `RuleEntry` catalogue, dispatched in-process via `tc_fitness.runner.main_cli` |
+| catalogue | `catalogue = "module:attr"` | your `RuleEntry` catalogue (your architecture rules), dispatched in-process via `tc_fitness.runner.main_cli` |
 
 Per-step options: `summary`, `cwd`, `env`, `allow_missing` (skip when the program
 isn't on PATH instead of failing), `continue_on_error` (record a FAIL but don't
-gate the aggregate — informational steps), and `fix:` / `next:` lines printed
+fail the aggregate — informational steps), and `fix:` / `next:` lines printed
 under the step's FAIL. The full schema lives in
 [`src/tc_fitness/gate_config.py`](src/tc_fitness/gate_config.py).
 
 `tc-fitness run` flags: `--repo-root` (default CWD), `--only ID` (run a subset of
-steps, repeatable), `--gate ID` (target one fitness rule inside a catalogue step),
-`--staged` (the `<60s` smoke tier — catalogue steps run through the *sound*
-per-rule `--staged` selection and any step flagged `skip_when_staged` in config,
+steps, repeatable), `--gate ID` (target one architecture rule inside a catalogue
+step), `--staged` (the `<60s` fast tier — catalogue steps run through the *sound*
+per-rule `--staged` selection, and any step flagged `skip_when_staged` in config,
 e.g. a full `pytest`/`mypy` leg, is dropped). This is the fast-feedback
 entrypoint kairix's `safe-commit.sh --check` builds on.
 
 ## Library modules
 
-It also ships these modules (the helpers `tc-fitness run` and a consumer's checks
-both build on):
+tc-fitness also ships these modules (the helpers `tc-fitness run` and a repo's
+checks both build on):
 
 - **`tc_fitness.lib`** — the merged check helpers:
   - **baseline gating** (from kairix `scripts/checks/_arch_lib.py`):
     `gate()`, `python_files()`, `main_entry()`, `repo_relative()`, `REPO_ROOT`.
   - **agent-actionable emit / YAML** (from tc-agent-zone `scripts/checks/_lib/`):
     `actionable()`, `emit_failures()`, `emit_pass()`, `load_yaml()`, `missing_keys()`.
-- **`tc_fitness.ratchet`** — the unified ratchet grammar: one override
-  min-length, one marker parser, one suppression grammar (see
-  *Drift reconciliation* below).
+- **`tc_fitness.ratchet`** — the unified grammar for "can only improve, never get
+  worse" gates: one override min-length, one marker parser, one suppression
+  grammar (see *Drift reconciliation* below).
 - **`tc_fitness.runner`** *(v0.3.0)* — the catalogue-driven, repo-agnostic check
   **runner**: in-process dispatch for python checks + guarded (optionally
   parallel) subprocess dispatch for shell checks, the named verdict ledger,
@@ -136,7 +206,7 @@ from tc_fitness import (
 
 > **v0.2.0 is an additive, backward-compatible superset of v0.1.0.** Every
 > v0.1.0 signature and behaviour is unchanged when the new optional parameters
-> are left at their defaults. A consumer pinned to `@v0.1.0` keeps working
+> are left at their defaults. A repo pinned to `@v0.1.0` keeps working
 > unmodified; the additions (`gate_keys`, `remediation`, `actionable(..., run=)`,
 > `is_vague_reason(..., min_len=)`, `parse_overrides(..., min_len=)`) exist to
 > cover tc-agent-zone's check surface. See *What v0.2.0 adds* below.
@@ -265,26 +335,31 @@ assumption doesn't hold. No additive gap was found here — `python_files`,
 
 ## How repositories consume it
 
-Pin to a tag in your `pyproject.toml` (git install — no PyPI publish):
+To add tc-fitness to a repo, follow [How to add it to a repo](#how-to-add-it-to-a-repo)
+above — pin the current tag (`@v0.6.1`) in your `pyproject.toml` and run
+`uv run tc-fitness run`. This section explains how the version pin works.
+
+Pin to a tag (git install — no PyPI publish); never `@main`. The version is the
+contract your checks depend on, so a repo only moves when you bump the tag:
 
 ```toml
 [project.optional-dependencies]
 dev = [
-  # kairix stays on v0.1.0 (the additions are a no-op for it); tc-agent-zone
-  # pins v0.2.0 for the gate_keys / remediation / run-marker / min_len surface.
-  "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.2.0",
+  "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.6.1",
 ]
 ```
 
 or, equivalently, on the command line:
 
 ```bash
-pip install "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.2.0"
+pip install "three-cubes-fitness @ git+https://github.com/three-cubes/tc-fitness.git@v0.6.1"
 ```
 
-Always pin a tag, never `@main` — the version is the contract the gates depend on.
-Because v0.2.0 is an additive superset, a consumer already pinned to `@v0.1.0`
-keeps working unchanged; bump to `@v0.2.0` only when you need the new surface.
+Each release is an additive, backward-compatible superset of the one before, so a
+repo pinned to an older tag keeps working unchanged and bumps only when it needs
+the newer surface. For example, the first two consumers pinned different tags:
+kairix on `@v0.1.0` (the later additions are a no-op for it) and tc-agent-zone on
+`@v0.2.0` (for the `gate_keys` / `remediation` / run-marker / `min_len` surface).
 
 ## The runner (v0.3.0)
 
@@ -295,8 +370,8 @@ v0.2.0 lib + ratchet surface is untouched.
 
 ### Thin-consumer API
 
-A consumer repo declares its own `tuple[RuleEntry, ...]` catalogue and its check
-modules, then its `run_checks.py` collapses to:
+A repo declares its own `tuple[RuleEntry, ...]` catalogue and its check modules,
+then its `run_checks.py` collapses to:
 
 ```python
 from tc_fitness.runner import main_cli
@@ -327,8 +402,8 @@ exit code. For tests and embedding there is a programmatic
   relational / always-run), single-sourced on each `RuleEntry`. The hard
   invariant is **no false negative on a staged change**: when scope can't be
   resolved, the rule runs (fail-safe).
-- A **paved-road footer hook** so a failing rule can point an agent at the
-  consumer's own query surface.
+- A **footer hook** so a failing rule can point an agent at the repo's own query
+  surface.
 
 ### Repo-agnostic by injection
 
@@ -341,7 +416,7 @@ injected through `RunnerConfig` seams:
 | `scope_resolver` | derive a rule's staged scope from its check script (the repo's FitnessRule-aware hook) when `staged_scope` is unset |
 | `enumeration_narrower` | the repo's extra file-index narrowing for file-local staged runs, layered on top of the package-level `tc_fitness.python_files` narrowing |
 | `conditional_check` | govern a `subprocess_arg_env` rule's runtime arg + exact skip text (e.g. a coverage check that needs a Cobertura XML) |
-| `paved_road_footer` | the affordance line printed under a FAIL |
+| `footer` | the line printed under a FAIL pointing at the repo's query surface |
 | `parallel_subprocess` | run shell checks on a thread pool |
 
 `RuleEntry.id` is id-agnostic — it accepts kairix's `"F26"` and tc-agent-zone's
@@ -362,10 +437,11 @@ rows to the package schema, pass its three helper modules as hooks, and collapse
 
 ## Drift reconciliation
 
-Both repos independently grew the same ratchet gates (coverage, mutation-survival,
-sonar-quality) and drifted on three details. This package resolves each to one
-behaviour. The merged version is the **superset-correct** choice — it satisfies
-every call pattern either repo relied on.
+Both repos independently grew the same "can only improve, never get worse" gates
+(coverage, mutation-survival, sonar-quality) and drifted on three details. This
+package resolves each to one behaviour. The merged version is the
+**superset-correct** choice — it satisfies every call pattern either repo relied
+on.
 
 ### 1. Override-rationale minimum length → **40 chars, strictly-less-than**
 
