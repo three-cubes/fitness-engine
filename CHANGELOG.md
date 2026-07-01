@@ -15,6 +15,27 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-07-01
+
+### Added
+
+- **`no_llm_attribution` CORE check** — machine-enforced clean authorship
+  (Autonomous Delivery Platform decision D1). Flags AI/LLM self-attribution
+  residue — `Co-Authored-By: <model>` trailers, `Generated with <tool>`
+  credits, the robot emoji (U+1F916), and AI-vendor `noreply` emails — in
+  files, commit messages, and PR bodies. Provider-neutral intrinsic defaults;
+  a bare vendor-name mention or a genuine human co-author is not flagged.
+  Baseline-grandfathered (guard-forward). Exposes the shared `scan_text`
+  detector plus two message modes that single-source detection: `--scan-file`
+  (read-only, for the CI reject leg) and `--strip-file` (in-place strip of
+  whole attribution lines, then reject only non-strippable residue — for the
+  commit-msg hook).
+- **`canonical_commit_identity` CORE check** — gates the author AND committer
+  identity of every commit in a range against a consumer `allowed_emails`
+  allowlist, with optional `allowed_name_patterns` (catches emoji/marker-in-name
+  identities). Guard-forward via a `cutover_ref` that bounds enforcement to
+  `cutover_ref..HEAD`; a no-op until a consumer supplies an allowlist.
+
 ## [0.7.0] - 2026-06-25
 
 ### Fixed
