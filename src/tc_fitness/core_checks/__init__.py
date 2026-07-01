@@ -168,6 +168,7 @@ CORE_CHECKS: tuple[str, ...] = (
     "core:no_internal_patches",
     "core:no_internal_patches_ts",
     "core:no_language_suffix_in_package_names",
+    "core:no_llm_attribution",
     "core:no_logging_secrets",
     "core:no_noop_test_scripts",
     "core:no_production_suppressions",
