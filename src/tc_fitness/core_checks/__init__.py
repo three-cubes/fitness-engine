@@ -157,6 +157,7 @@ CORE_CHECKS: tuple[str, ...] = (
     "core:coverage_floor",
     "core:coverage_includes_branches",
     "core:empty_body_intent",
+    "core:engine_version_floor",
     "core:every_test_has_tier_marker",
     "core:integrity_state_predicate",
     "core:license_present",
