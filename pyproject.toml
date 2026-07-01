@@ -145,7 +145,8 @@ ruff format --check \
   $(printf 'tests/test_core_%s.py ' \
     actionable_feedback adr_number_unique ci_fanin_parity \
     ci_silencers_have_rationale cognitive_complexity coverage_floor \
-    coverage_includes_branches empty_body_intent every_test_has_tier_marker \
+    coverage_includes_branches empty_body_intent engine_version_floor \
+    every_test_has_tier_marker \
     license_present mutation_survival_ratchet no_commented_out_code \
     no_env_monkeypatch no_hardcoded_repo_paths no_internal_monkeypatch \
     no_internal_patches no_internal_patches_ts \
