@@ -78,6 +78,10 @@ ignore = ["E501", "RUF022"]
 # config-declared refs — the same trusted-argv0 posture as branch_naming, not
 # input under attacker control (S603/S607).
 "src/tc_fitness/keystone.py" = ["S603", "S607"]
+# canonical_commit_identity gates commit author/committer metadata by invoking
+# `git log` by name with a fixed argv0 and config-declared refs — the same
+# trusted-argv0 posture as keystone/branch_naming (S603/S607).
+"src/tc_fitness/core_checks/canonical_commit_identity.py" = ["S603", "S607"]
 
 [tool.mypy]
 python_version = "3.12"
