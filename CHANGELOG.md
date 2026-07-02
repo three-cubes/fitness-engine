@@ -15,6 +15,19 @@ stdlib at runtime (PyYAML is an optional `yaml` extra) and must never import
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-07-02
+
+### Added
+
+- **`engine_version_floor` CORE check** — fails when the consumer's pinned
+  tc-fitness version is below a configured floor, so a repo can require a
+  minimum engine version (a check the consumer adopts only once it repins).
+- **`canonical_commit_identity` web-flow / platform-bot committer allowlist** —
+  the check now intrinsically allowlists the GitHub web-flow committer
+  (`GitHub <noreply@github.com>`, stamped on every squash/merge through the UI)
+  plus the `dependabot[bot]` / `renovate[bot]` platform committers, so it stays
+  green as PRs merge through the GitHub UI. The AUTHOR check stays strict.
+
 ## [0.7.1] - 2026-07-01
 
 ### Added

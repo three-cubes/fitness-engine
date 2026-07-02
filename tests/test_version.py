@@ -26,8 +26,9 @@ def test_version_matches_installed_metadata() -> None:
     assert tc_fitness.__version__ == metadata_version
 
 
-def test_version_is_v0_7_1() -> None:
-    # v0.7.1 adds the no_llm_attribution + canonical_commit_identity CORE checks
-    # (additive over v0.7.0). The literal tracks the pyproject version so the
+def test_version_is_v0_7_2() -> None:
+    # v0.7.2 adds the engine_version_floor CORE check + the
+    # canonical_commit_identity web-flow/platform-bot committer allowlist
+    # (additive over v0.7.1). The literal tracks the pyproject version so the
     # CHANGELOG entry stays honest and a tag bump can't drift the two apart.
-    assert tc_fitness.__version__ == "0.7.1"
+    assert tc_fitness.__version__ == "0.7.2"
