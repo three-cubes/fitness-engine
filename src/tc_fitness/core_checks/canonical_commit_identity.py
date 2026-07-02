@@ -6,6 +6,14 @@ on the consumer's allowlist (the canonical agent GitHub App + named human
 maintainers), and — when name patterns are configured — a name matching one of
 them (catching emoji/marker-in-name identities like ``Builder 🔨``).
 
+The AUTHOR is held strictly to that allowlist — author identity is what governance
+cares about. The COMMITTER is checked against the allowlist UNION an intrinsic set
+of platform committers — GitHub's web-flow signer plus Dependabot/Renovate (SGO-198):
+GitHub rewrites the committer to ``GitHub <noreply@github.com>`` on every squash/merge
+performed through the UI, so gating the committer strictly would fail any scanned
+range that includes a merged commit. These platform identities are always allowed as
+*committers* so the check can't be broken per-repo by forgetting to allowlist them.
+
 This is a RANGE check, not a file check: the unit of violation is a commit, so
 it overrides :meth:`collect_violations` and reads ``git log`` rather than
 walking files. It is repo-agnostic — the allowlist, the name patterns, and the
@@ -35,6 +43,26 @@ DEFAULT_HEAD_REF = "HEAD"
 #: Unit-separator delimited git-log record: sha, author name/email, committer name/email.
 _SEP = "\x1f"
 _FORMAT = _SEP.join(("%H", "%an", "%ae", "%cn", "%ce"))
+
+#: Committers that platform automation stamps onto otherwise-canonical commits and
+#: which are therefore ALWAYS allowed as *committers* (never as authors): GitHub's
+#: web-flow signer (``GitHub <noreply@github.com>``), set as the committer on every
+#: squash/merge performed through the UI, plus the Dependabot and Renovate bot
+#: accounts. The committer on a merged or bot-raised commit is the platform, not a
+#: rogue identity, so gating it strictly would fail every consumer the moment it
+#: accrues merged history (SGO-198). Web-flow is matched by exact email; the bots by
+#: the stable ``+<bot>[bot]@users.noreply.github.com`` no-reply suffix GitHub mints.
+_WEBFLOW_COMMITTER_EMAIL = "noreply@github.com"
+_PLATFORM_COMMITTER_SUFFIXES: tuple[str, ...] = (
+    "+dependabot[bot]@users.noreply.github.com",
+    "+renovate[bot]@users.noreply.github.com",
+)
+
+
+def _is_platform_committer(email: str) -> bool:
+    """True for the GitHub web-flow / Dependabot / Renovate committer identities."""
+    return email == _WEBFLOW_COMMITTER_EMAIL or email.endswith(_PLATFORM_COMMITTER_SUFFIXES)
+
 
 REMEDIATION = _remediation(
     fix=(
@@ -121,6 +149,16 @@ class CanonicalCommitIdentity(FitnessRule):
             return False
         return True
 
+    def _committer_ok(self, name: str, email: str) -> bool:
+        """Committer identity check: the configured allowlist plus platform committers.
+
+        Unlike the author, the committer of a merged commit is GitHub's web-flow
+        signer and the committer of a bot-raised PR is the bot itself; those
+        platform identities (:data:`_is_platform_committer`) are always allowed,
+        bypassing both the email allowlist and the name patterns.
+        """
+        return _is_platform_committer(email) or self._identity_ok(name, email)
+
     def file_has_violation(self, path: Path) -> bool:
         """Unused — this is a range/commit check (see :meth:`collect_violations`)."""
         return False
@@ -130,7 +168,12 @@ class CanonicalCommitIdentity(FitnessRule):
         return []
 
     def collect_violations(self) -> set[Path]:
-        """Every in-range commit with an off-allowlist author/committer identity."""
+        """Every in-range commit with an off-allowlist author/committer identity.
+
+        The AUTHOR is held strictly to the configured allowlist; the COMMITTER is
+        allowed if it is a platform committer (web-flow / Dependabot / Renovate) or
+        otherwise on the allowlist — see :meth:`_committer_ok`.
+        """
         if not self._configured():
             return set()
         out: set[Path] = set()
@@ -138,7 +181,7 @@ class CanonicalCommitIdentity(FitnessRule):
             bad: list[str] = []
             if not self._identity_ok(an, ae):
                 bad.append(f"author {an} <{ae}>")
-            if not self._identity_ok(cn, ce):
+            if not self._committer_ok(cn, ce):
                 bad.append(f"committer {cn} <{ce}>")
             if bad:
                 out.add(Path(f"{sha[:12]} {'; '.join(bad)}"))
