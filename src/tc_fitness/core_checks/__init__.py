@@ -156,6 +156,7 @@ CORE_CHECKS: tuple[str, ...] = (
     "core:cognitive_complexity",
     "core:coverage_floor",
     "core:coverage_includes_branches",
+    "core:deterministic_tests",
     "core:empty_body_intent",
     "core:engine_version_floor",
     "core:every_test_has_tier_marker",
